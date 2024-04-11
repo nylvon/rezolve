@@ -20,28 +20,21 @@ pub fn main() !void {
     var e = Equation.init(allocator);
     defer e.deinit(allocator);
 
-    const sampleNode = INT{ .Data = SBDT.init("k", false, .{ .Computed = .{ .Integer = 1 } }) };
-    var sampleData = Equation.DataType{ .Constant = SBDT.init("z", false, .{ .NeedsRecompute = .{ .Integer = 2 } }) };
+    // const sampleNode = INT{ .Data = SBDT.init("k", false, .{ .Computed = .{ .Integer = 1 } }) };
+    var sampleData = Equation.DataType{ .Constant = SBDT.init("z", false, .{ .Computed = .{ .Integer = 2 } }) };
 
-    const rn = try e.changeRoot(sampleNode, allocator);
-    const rn2 = try e.tryAddNode(@constCast(rn), sampleNode, allocator);
-    _ = try e.tryAddNode(@constCast(rn2), sampleNode, allocator);
-    _ = try e.tryAddReference(@constCast(rn2), Symbol.init("a", false), true, allocator);
-    _ = try e.tryAddReference(@constCast(rn2), Symbol.init("b", false), true, allocator);
-    _ = try e.tryAddReference(@constCast(rn2), Symbol.init("ref(b)", false), true, allocator);
-    // var n1 = try rn.addChildByData(sampleNode, allocator);
-    // var n2 = try rn.addChildByData(sampleNode, allocator);
-    // var n3 = try rn.addChildByData(sampleNode, allocator);
-    // _ = try n1.addChildByData(sampleNode, allocator);
-    // _ = try n1.addChildByData(sampleNode, allocator);
-    // _ = try n2.addChildByData(sampleNode, allocator);
-    // _ = try n2.addChildByData(sampleNode, allocator);
-    // _ = try n2.addChildByData(sampleNode, allocator);
-    // _ = try n2.addChildByData(sampleNode, allocator);
-    // _ = try n3.addChildByData(sampleNode, allocator);
-    // _ = try n3.addChildByData(sampleNode, allocator);
+    const rn = try e.start(allocator);
+    // const rn1 = try e.tryAddNode(@constCast(rn), sampleNode, allocator);
 
     try e.tryDefineData(&sampleData, false);
+
+    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), false, allocator);
+    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), false, allocator);
+    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), false, allocator);
+    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), true, allocator);
+    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), true, allocator);
+    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), true, allocator);
+
     try e.tryPrint(stdout, true);
 
     try bw.flush();

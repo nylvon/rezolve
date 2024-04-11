@@ -45,6 +45,27 @@ pub const EquationUnmanaged = struct {
         return &self.root_node.?;
     }
 
+    /// Temporary name for the result of the equation.
+    /// TODO: Turn this into a random UUID4 variable name.
+    /// TODO: Or maybe dictate an API?
+    /// TODO: Maybe make it a parameter?
+    pub const EquationResultName = "_result";
+    pub const EquationResultSymbol = SymbolicType.init(EquationResultName, false);
+
+    /// Starts the equation definition by setting the root node to be the
+    /// result of the entire equation tree, and adding a variable where this would
+    /// be stored in, in the data store.
+    pub fn start(self: *EquationUnmanaged, allocator: std.mem.Allocator) !*NodeType {
+        // Define the equation's result variable.
+        const result_definition = SymbolicBaseDataType.initFull(EquationResultSymbol, .{ .NotComputed = DataType.UnknownValue });
+        const result_definition_data = DataType{ .OperationResult = result_definition };
+        try self.data_store.put(EquationResultSymbol, result_definition_data);
+
+        // TODO: Change this to an "equal" operator's outcome after operators and operations are implemented.
+        const result_reference_node = InnerNodeType{ .Reference = SymbolicReferenceType.initFull(EquationResultSymbol) };
+        return try self.changeRoot(result_reference_node, allocator);
+    }
+
     pub const EquationErrors = error{SymbolAlreadyDefined};
 
     /// TODO: Wrap the entire thing in some API.
@@ -116,12 +137,14 @@ pub const EquationUnmanaged = struct {
     pub fn tryPrint(self: *EquationUnmanaged, writer_ctx: anytype, strict: bool) !void {
         var iter = self.data_store.iterator();
         while (iter.next()) |*entry| {
+            try writer_ctx.print("['", .{});
             try entry.key_ptr.tryPrint(writer_ctx);
-            try writer_ctx.print(" >> ", .{});
+            try writer_ctx.print("'] = ", .{});
             try entry.value_ptr.tryPrint(writer_ctx);
             try writer_ctx.print("\n", .{});
         }
         if (self.root_node) |*root| {
+            try writer_ctx.print("\nEquation tree:\n", .{});
             try root.tryPrint(writer_ctx, 0, strict);
         }
     }
