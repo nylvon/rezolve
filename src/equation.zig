@@ -3,29 +3,31 @@ const std = @import("std");
 /// Represents an equation by a tree of operations,
 /// and possesses a store of data that includes parameters,
 /// constants and cached operation results.
-/// NOTE: Equation is currently managed. Maybe make it unmanaged
-///       and derive the managed type from it.
-pub const Equation = struct {
+/// TODO: Equation is currently managed. Maybe make it unmanaged
+/// TODO: and derive the managed type from it.
+pub const EquationUnmanaged = struct {
     /// Defined parameters, constants and cached operation results.
     data_store: DataStoreType,
     /// Root equation node, very first one.
     root_node: ?NodeType,
-    /// This type holds an allocator for itself.
-    allocator: std.mem.Allocator,
 
     /// Initializes the equation and the data store.
-    pub fn init(allocator: std.mem.Allocator) Equation {
-        return Equation{
+    pub fn init(allocator: std.mem.Allocator) EquationUnmanaged {
+        return EquationUnmanaged{
             .root_node = null,
-            .allocator = allocator,
             .data_store = DataStoreType.init(allocator),
         };
     }
 
     /// Recursively de-initializes the nodes and the data store.
-    pub fn deinit(self: *Equation) void {
+    pub fn deinit(self: *EquationUnmanaged, allocator: std.mem.Allocator) void {
         if (self.root_node) |*root| {
-            root.deinit();
+            root.deinit(allocator);
+        }
+        var iter = self.data_store.iterator();
+        while (iter.next()) |*entry| {
+            entry.key_ptr.deinit(allocator);
+            entry.value_ptr.deinit(allocator);
         }
         self.data_store.deinit();
     }
@@ -35,16 +37,94 @@ pub const Equation = struct {
     /// (This will delete the operation results in the data store, but will not clear
     /// the parameters, constants and other data points not affiliated with operations)
     /// TODO: Maybe reconsider the reset. Option for it?
-    pub fn changeRoot(self: *Equation, node_data: ?InnerNodeType) !*NodeType {
+    pub fn changeRoot(self: *EquationUnmanaged, node_data: ?InnerNodeType, allocator: std.mem.Allocator) !*NodeType {
         if (self.root_node) |*r| {
-            r.deinit();
+            r.deinit(allocator);
         }
-        self.root_node = NodeType.initFull(node_data, self.allocator);
+        self.root_node = NodeType.initFull(node_data, allocator);
         return &self.root_node.?;
     }
 
+    pub const EquationErrors = error{SymbolAlreadyDefined};
+
     /// TODO: Wrap the entire thing in some API.
     /// TODO: With stuff like: addOperator(), defineOperator(), addReference(), etc...
+
+    //
+    ///
+    pub fn tryDefineData(self: *EquationUnmanaged, data: *DataType, override_if_exists: bool) !void {
+        if (self.data_store.getEntry(data.getSymbol())) |*entry| {
+            if (override_if_exists) {
+                entry.value_ptr.* = data.*;
+            } else {
+                return EquationErrors.SymbolAlreadyDefined;
+            }
+        } else {
+            try self.data_store.put(data.getSymbol(), data.*);
+        }
+    }
+
+    /// Attaches an already existent node to a parent node in the equation tree.
+    pub fn tryAttachNode(self: *EquationUnmanaged, parent: *NodeType, new_child: *NodeType) !*NodeType {
+        _ = self; // Using self to keep API consistent. Not actually using it here, though. Syntactic sugar.
+        return try parent.addChildByNode(new_child);
+    }
+
+    /// Creates a new node and attaches it to a parent node in the equation tree.
+    pub fn tryAddNode(self: *EquationUnmanaged, parent: *NodeType, new_child_data: InnerNodeType, allocator: std.mem.Allocator) !*NodeType {
+        _ = self;
+        return try parent.addChildByData(new_child_data, allocator);
+    }
+
+    pub fn tryAddReference(self: *EquationUnmanaged, parent: *NodeType, new_child_reference_symbol: SymbolicType, force_define_if_not_defined: bool, allocator: std.mem.Allocator) !*NodeType {
+        // try to find what it is referencing
+        if (self.tryFindSymbol(new_child_reference_symbol)) |symbol_definition| {
+            // if found, make a reference node pointing to it
+            const new_reference = SymbolicReferenceType.initFull(symbol_definition.getSymbol());
+            const symbol_node = InnerNodeType{ .Reference = new_reference };
+            return try parent.addChildByData(symbol_node, allocator);
+        } else if (force_define_if_not_defined) {
+            // not referencing anything, so we'll make a new constant for it to reference for now.
+            const definition = SymbolicBaseDataType.initFull(new_child_reference_symbol, .{ .NotComputed = DataType.UnknownValue });
+            const wrapped_definition = DataType{ .Constant = definition };
+            try self.data_store.put(new_child_reference_symbol, wrapped_definition);
+
+            // Then define a reference to this new constant.
+            const new_reference = SymbolicReferenceType.init(new_child_reference_symbol.representation, false);
+            const wrapped_reference = DataType{ .Reference = new_reference };
+
+            // name the reference something else
+            const allocated_symbol_rep = try std.fmt.allocPrint(allocator, "ref({s})", .{new_child_reference_symbol.representation});
+            try self.data_store.put(SymbolicType.init(allocated_symbol_rep, true), wrapped_reference);
+            const new_reference_node = InnerNodeType{ .Reference = new_reference };
+            return try parent.addChildByData(new_reference_node, allocator);
+        } else return SymbolicReferenceType.ReferenceError.NotFound;
+    }
+
+    ///
+    pub fn tryFindSymbol(self: *EquationUnmanaged, symbol: SymbolicType) ?*DataType {
+        if (self.data_store.getEntry(symbol)) |*symbol_definition| {
+            return symbol_definition.value_ptr;
+        }
+        return null;
+    }
+
+    /// Ease-of-use printing function, that uses an external context for printing.
+    /// The writer context must implement the following function:
+    ///     fn print(<self type>, comptime []const u8, anytype)
+    /// TODO: Check that writer_ctx implements the required interface.
+    pub fn tryPrint(self: *EquationUnmanaged, writer_ctx: anytype, strict: bool) !void {
+        var iter = self.data_store.iterator();
+        while (iter.next()) |*entry| {
+            try entry.key_ptr.tryPrint(writer_ctx);
+            try writer_ctx.print(" >> ", .{});
+            try entry.value_ptr.tryPrint(writer_ctx);
+            try writer_ctx.print("\n", .{});
+        }
+        if (self.root_node) |*root| {
+            try root.tryPrint(writer_ctx, 0, strict);
+        }
+    }
 
     //
     /// The type used to hold the data associated with the equation.
@@ -53,14 +133,16 @@ pub const Equation = struct {
     /// TODO: What about a customizable one? Auto-set the type.
     /// TODO: Commute from some simple structure, like an array of string!datatype entries
     /// TODO: Into the string hashmap of symbols. Or maybe not?
-    pub const DataStoreType = std.StringHashMap(DataType);
+    ///
+    pub const DataStoreType = std.HashMap(SymbolicType, DataType, SymbolicType.Context, std.hash_map.default_max_load_percentage);
 
     /// Delimitates what type of data node one entry into the data store is.
-    pub const DataSource = enum { Constant, OperationResult };
+    pub const DataSource = enum { Constant, Reference, OperationResult };
 
     /// Holds information about the equation's data.
     pub const DataType = union(DataSource) {
         Constant: SymbolicBaseDataType,
+        Reference: SymbolicReferenceType,
         OperationResult: SymbolicBaseDataType,
 
         /// The namespace used for all data errors.
@@ -74,12 +156,24 @@ pub const Equation = struct {
             };
         };
 
+        pub fn deinit(self: *DataType, allocator: std.mem.Allocator) void {
+            switch (self.*) {
+                .Constant => |*c| c.deinit(allocator),
+                .Reference => |*r| r.deinit(allocator),
+                .OperationResult => |*opr| opr.deinit(allocator),
+            }
+        }
+
         /// Get the value of some data entry.
         /// Does not unwrap the value, or do any error reporting.
         /// Will require you to filter it according to your need.
-        pub fn getValueUnsafe(self: *DataType) *ValueType {
+        pub fn getValueUnsafe(self: *DataType, store: *DataStoreType) *ValueType {
             switch (self.*) {
                 .Constant => |c| return c.value,
+                .Reference => |*r| {
+                    const result = try r.tryFind(store);
+                    return try result.getValueUnsafe(store);
+                },
                 .OperationResult => |o| return o.value,
             }
         }
@@ -95,21 +189,77 @@ pub const Equation = struct {
                 .Computed => |c| return c,
             }
         }
+
+        /// Gets the symbol of the data.
+        pub fn getSymbol(self: *DataType) SymbolicType {
+            switch (self.*) {
+                .Constant => |*c| return c.symbol,
+                .Reference => |*r| return r.symbol_reference,
+                .OperationResult => |*opr| return opr.symbol,
+            }
+        }
+
+        /// Ease-of-use printing function, that uses an external context for printing.
+        /// The writer context must implement the following function:
+        ///     fn print(<self type>, comptime []const u8, anytype)
+        /// TODO: Check that writer_ctx implements the required interface.
+        pub fn tryPrint(self: *DataType, writer_ctx: anytype) !void {
+            switch (self.*) {
+                .Constant => |*c| {
+                    try c.tryPrint(writer_ctx);
+                    try writer_ctx.print(" [Constant]", .{});
+                },
+                .Reference => |*r| {
+                    try r.tryPrint(writer_ctx);
+                    try writer_ctx.print(" [Reference]", .{});
+                },
+                .OperationResult => |*opr| {
+                    try opr.tryPrint(writer_ctx);
+                    try writer_ctx.print(" [Operation Result]", .{});
+                },
+            }
+        }
     };
 
     /// TODO: Think of some description for this type.
     pub const SymbolicType = struct {
         /// The actual representation underlying it.
         representation: RepresentationType,
+        allocated: bool,
 
         /// The type that is going to be used for representing symbols.
         pub const RepresentationType = []const u8;
+
+        /// For custom hash-map definition.
+        pub const Context = struct {
+            pub fn hash(self: @This(), s: SymbolicType) u64 {
+                _ = self;
+                return std.hash_map.hashString(s.representation);
+            }
+            pub fn eql(self: @This(), a: SymbolicType, b: SymbolicType) bool {
+                _ = self;
+                return std.hash_map.eqlString(a.representation, b.representation);
+            }
+        };
 
         /// Ease-of-use printing function, that uses an external context for printing.
         /// The writer context must implement the following function:
         ///     fn print(<self type>, comptime []const u8, anytype)
         pub fn tryPrint(self: *SymbolicType, writer_ctx: anytype) !void {
             try writer_ctx.print("{s}", .{self.representation});
+        }
+
+        pub fn init(rep: RepresentationType, isAllocated: bool) SymbolicType {
+            return SymbolicType{
+                .representation = rep,
+                .allocated = isAllocated,
+            };
+        }
+
+        pub fn deinit(self: *SymbolicType, allocator: std.mem.Allocator) void {
+            if (self.allocated == true) {
+                allocator.free(self.representation);
+            }
         }
     };
 
@@ -174,6 +324,20 @@ pub const Equation = struct {
         /// The value associated with the symbol.
         value: ValueType,
 
+        pub fn initFull(symbol: SymbolicType, value: ValueType) SymbolicBaseDataType {
+            return SymbolicBaseDataType{
+                .symbol = symbol,
+                .value = value,
+            };
+        }
+
+        pub fn init(rep: SymbolicType.RepresentationType, isAllocated: bool, value: ValueType) SymbolicBaseDataType {
+            return SymbolicBaseDataType{
+                .symbol = SymbolicType.init(rep, isAllocated),
+                .value = value,
+            };
+        }
+
         /// Ease-of-use printing function, that uses an external context for printing.
         /// The writer context must implement the following function:
         ///     fn print(<self type>, comptime []const u8, anytype)
@@ -184,6 +348,10 @@ pub const Equation = struct {
             try writer_ctx.print(": ", .{});
             try self.value.tryPrint(writer_ctx);
         }
+
+        pub fn deinit(self: *SymbolicBaseDataType, allocator: std.mem.Allocator) void {
+            self.symbol.deinit(allocator);
+        }
     };
 
     /// A reference links a symbol to some symbolic data.
@@ -192,7 +360,26 @@ pub const Equation = struct {
         symbol_reference: SymbolicType,
 
         /// Error set for symbolic references.
-        pub const ReferenceError = error{NotFound};
+        pub const ReferenceError = error{
+            /// The symbol was not found during the look-up.
+            NotFound,
+        };
+
+        pub fn initFull(symbol: SymbolicType) SymbolicReferenceType {
+            return SymbolicReferenceType{
+                .symbol_reference = symbol,
+            };
+        }
+
+        pub fn init(rep: SymbolicType.RepresentationType, isAllocated: bool) SymbolicReferenceType {
+            return SymbolicReferenceType{
+                .symbol_reference = SymbolicType.init(rep, isAllocated),
+            };
+        }
+
+        pub fn deinit(self: *SymbolicReferenceType, allocator: std.mem.Allocator) void {
+            self.symbol_reference.deinit(allocator);
+        }
 
         /// Tries to find the symbolic data in a data store.
         pub fn tryFind(self: *SymbolicReferenceType, store: *DataStoreType) !*DataType {
@@ -229,19 +416,33 @@ pub const Equation = struct {
 
     /// Lays out the types of nodes that can be used.
     pub const NodeTag = enum {
-        Data, // Variable.
-        Reference, // Reference to a a variable defined within the current math tree type.
-        Operator, // Operator. (?)
+        /// Data nodes can store symbolic constants, variables, and more.
+        Data,
+        /// References nodes store symbolic references to data.
+        Reference,
+        /// Not yet implemented, but an operation node would execute some operation on nodes.
+        Operation,
     };
 
     /// Maps the type of node with a node definition.
     pub const InnerNodeType = union(NodeTag) {
         Data: SymbolicBaseDataType,
         Reference: SymbolicReferenceType,
-        Operator: void,
+        Operation: void, // <--- Not yet implemented.
 
-        /// TODO: Think of some description here.
-        pub const InnerNodeError = error{NotImplemented};
+        /// Lays out the possible errors for this type.
+        pub const InnerNodeError = error{
+            /// This type of node is not yet implemented
+            NotImplemented,
+        };
+
+        pub fn deinit(self: *InnerNodeType, allocator: std.mem.Allocator) void {
+            switch (self.*) {
+                .Data => |*d| d.deinit(allocator),
+                .Reference => |*r| r.deinit(allocator),
+                .Operation => return,
+            }
+        }
 
         /// Ease-of-use printing function, that uses an external context for printing.
         /// The writer context must implement the following function:
@@ -252,7 +453,7 @@ pub const Equation = struct {
             switch (self.*) {
                 .Data => |*d| try d.tryPrint(writer_ctx),
                 .Reference => |*r| try r.tryPrint(writer_ctx),
-                .Operator => return InnerNodeError.NotImplemented,
+                .Operation => return InnerNodeError.NotImplemented,
             }
         }
     };
@@ -286,10 +487,11 @@ pub const Equation = struct {
         /// This will recursively deinitialize the node and its children.
         /// TODO: Implement a 'pop' function that will return the children
         /// TODO: so the pointers won't be dangling.
-        pub fn deinit(self: *NodeType) void {
+        pub fn deinit(self: *NodeType, allocator: std.mem.Allocator) void {
             for (self.children.items) |*child| {
-                child.deinit();
+                child.deinit(allocator);
             }
+            if (self.data) |*d| d.deinit(allocator);
             self.children.deinit();
         }
 
