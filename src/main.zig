@@ -4,7 +4,7 @@ const fs = std.fs;
 const eq = @import("equation.zig");
 const Equation = eq.EquationUnmanaged;
 const INT = Equation.InnerNodeType;
-const SBDT = Equation.SymbolicBaseDataType;
+const SBDT = Equation.SymbolicDataType;
 const Symbol = Equation.SymbolicType;
 const Timer = std.time.Timer; // Will be used for benchmarking later.
 
@@ -21,19 +21,19 @@ pub fn main() !void {
     defer e.deinit(allocator);
 
     // const sampleNode = INT{ .Data = SBDT.init("k", false, .{ .Computed = .{ .Integer = 1 } }) };
-    var sampleData = Equation.DataType{ .Constant = SBDT.init("z", false, .{ .Computed = .{ .Integer = 2 } }) };
+    var sampleData = Equation.DataType{ .Constant = SBDT.init(Symbol.initNoAlloc("z"), .{ .Computed = .{ .Integer = 2 } }) };
 
     const rn = try e.start(allocator);
     // const rn1 = try e.tryAddNode(@constCast(rn), sampleNode, allocator);
 
-    try e.tryDefineData(&sampleData, false);
+    try e.tryDefineDataUnsafe(&sampleData, false);
 
-    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), false, allocator);
-    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), false, allocator);
-    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), false, allocator);
-    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), true, allocator);
-    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), true, allocator);
-    _ = try e.tryAddReference(@constCast(rn), Symbol.init("z", false), true, allocator);
+    _ = try e.tryAddReferenceUnsafe(@constCast(rn), Symbol.init("z", false), false, allocator);
+    _ = try e.tryAddReferenceUnsafe(@constCast(rn), Symbol.init("z", false), false, allocator);
+    _ = try e.tryAddReferenceUnsafe(@constCast(rn), Symbol.init("z", false), false, allocator);
+    _ = try e.tryAddReferenceUnsafe(@constCast(rn), Symbol.init("z", false), true, allocator);
+    _ = try e.tryAddReferenceUnsafe(@constCast(rn), Symbol.init("z", false), true, allocator);
+    _ = try e.tryAddReferenceUnsafe(@constCast(rn), Symbol.init("z", false), true, allocator);
 
     try e.tryPrint(stdout, true);
 
