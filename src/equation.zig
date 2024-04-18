@@ -192,12 +192,13 @@ pub const EquationUnmanaged = struct {
     pub const DataStoreType = std.HashMap(SymbolicType, DataType, SymbolicType.Context, std.hash_map.default_max_load_percentage);
 
     /// Delimitates what type of data node one entry into the data store is.
-    pub const DataSource = enum { Constant, Reference, OperationResult };
+    pub const DataSource = enum { Constant, Reference, Operator, OperationResult };
 
     /// Represents all the possible data types known by ReZolve.
     pub const DataType = union(DataSource) {
         Constant: SymbolicDataType,
         Reference: SymbolicReferenceType,
+        Operator: SymbolicOperatorType,
         OperationResult: SymbolicDataType,
 
         /// The namespace used for all data errors.
@@ -216,6 +217,7 @@ pub const EquationUnmanaged = struct {
             switch (self.*) {
                 .Constant => |*c| c.deinit(allocator),
                 .Reference => |*r| r.deinit(allocator),
+                .Operator => |*op| op.deinit(allocator),
                 .OperationResult => |*opr| opr.deinit(allocator),
             }
         }
@@ -223,13 +225,18 @@ pub const EquationUnmanaged = struct {
         /// Get the value of some data entry.
         /// Does not unwrap the value, or do any error reporting.
         /// Will require you to filter it according to your need.
-        pub fn getValueUnsafe(self: *DataType, store: *DataStoreType) *ValueType {
+        /// Will error if look-ups fail, or if trying to query data cannot have a value (i.e.: Operators)
+        pub fn getValueUnsafe(self: *DataType, store: *DataStoreType) !*ValueType {
             switch (self.*) {
                 .Constant => |c| return c.value,
                 .Reference => |*r| {
                     const result = try r.tryFind(store);
                     return try result.getValueUnsafe(store);
                 },
+                // Symbolic operator definitions do not have values, they're merely "templates" or instructions
+                // on how equation nodes ought to be inserted to represent it.
+                // The operation results would be what you want to query, not this.
+                .Operator => return DataErrors.DefinitionError.LacksValue,
                 .OperationResult => |o| return o.value,
             }
         }
@@ -239,8 +246,9 @@ pub const EquationUnmanaged = struct {
         pub const UnknownValue = InnerValueType{ .Integer = 0 };
 
         /// Filters the value such that it makes sense.
-        pub fn getValue(self: *DataType) InnerValueType {
-            switch (self.getValueUnsafe().*) {
+        /// Will error if the data cannot have a value (i.e.: Operators)
+        pub fn getValue(self: *DataType) !InnerValueType {
+            switch (try self.getValueUnsafe().*) {
                 .NotComputed => return UnknownValue,
                 .NeedsRecompute => |nrc| return nrc,
                 .Computed => |c| return c,
@@ -252,6 +260,7 @@ pub const EquationUnmanaged = struct {
             switch (self.*) {
                 .Constant => |*c| return c.symbol,
                 .Reference => |*r| return r.symbol_reference,
+                .Operator => |*op| return op.symbol,
                 .OperationResult => |*opr| return opr.symbol,
             }
         }
@@ -269,6 +278,10 @@ pub const EquationUnmanaged = struct {
                 .Reference => |*r| {
                     try r.tryPrint(writer_ctx);
                     try writer_ctx.print(" [Reference]", .{});
+                },
+                .Operator => |*op| {
+                    try op.tryPrint(writer_ctx);
+                    try writer_ctx.print(" [Operator]", .{});
                 },
                 .OperationResult => |*opr| {
                     try opr.tryPrint(writer_ctx);
@@ -469,6 +482,125 @@ pub const EquationUnmanaged = struct {
         /// De-initalizes the symbolic data. Also does the memory clean-up.
         pub fn deinit(self: *SymbolicDataType, allocator: std.mem.Allocator) void {
             self.symbol.deinit(allocator);
+        }
+    };
+
+    /// The definition of an operator.
+    /// The arities dictate the cardinalities of the sets of input values and output values.
+    /// They are used in order to validate this function.
+    /// The operator_fn field is a function pointer to the actual implementation of the operation.
+    /// NOTE: Hopefully the compiler is smart enough to understand this is a constant.
+    /// NOTE: Otherwise we may have to do a separate build step for this to alleviate the fnptr cost.
+    /// NOTE: Probably way too overkill, but it may be significant for the branch predictor.
+    pub const OperatorDefinitionType = struct {
+        // The arity of the inputs of this operator
+        in_arity: ArityType,
+        // The arity of the outputs of this operator
+        out_arity: ArityType,
+        // The actual function that is called to transform the input into the outputs.
+        operator_fn: OperatorFunctionType,
+
+        /// Data type used to represent the arity of an operator.
+        pub const ArityType = u64;
+
+        /// The base function type used by all operators has this signature.
+        pub const OperatorFunctionType = *const fn (data: []ValueType) []ValueType;
+
+        /// The error set for the operator definition.
+        pub const OperatorError = error{
+            // There's 3 separate errors just for verbosity.
+            // The only invalid arities are when they're zero.
+            // Such verbosity may not really be necessary, but you never know when you need it.
+            // The cost associated with it is negligible, since operator definitions are usually
+            // just done once at the very beginning.
+            // Better to fail early and verbose than to be stuck debugging.
+
+            // Invalid arity errors
+            InputArityIsZero,
+            OutputArityIsZero,
+            AritiesAreZero,
+        };
+
+        /// Initializes the operator definition.
+        /// The in_arity and out_arities must be at least 1.
+        pub fn init(in_arity: ArityType, out_arity: ArityType, operator_fn: OperatorFunctionType) !OperatorDefinitionType {
+            if (in_arity == 0 and out_arity == 0) return OperatorError.AritiesAreZero;
+            if (in_arity == 0) return OperatorError.InputArityIsZero;
+            if (out_arity == 0) return OperatorError.OutputArityIsZero;
+            return OperatorDefinitionType{
+                .in_arity = in_arity,
+                .out_arity = out_arity,
+                .operator_fn = operator_fn,
+            };
+        }
+
+        // TODO: Implement more ease of use functions, maybe.
+
+        /// Ease of use function.
+        /// Creates a unary operator definition given a function
+        /// Unary operator:
+        ///     Takes in one value, outputs one value.
+        pub fn unary(operator_fn: OperatorFunctionType) OperatorDefinitionType {
+            return OperatorDefinitionType.init(1, 1, operator_fn) catch unreachable;
+        }
+
+        /// Ease of use function.
+        /// Creates a binary operator definition given a function
+        /// Binary operator:
+        ///     Takes in two values, outputs one value.
+        pub fn binary(operator_fn: OperatorFunctionType) OperatorDefinitionType {
+            return OperatorDefinitionType.init(2, 1, operator_fn) catch unreachable;
+        }
+
+        /// Ease of use function.
+        /// Creates a ternary operator definition given a function
+        /// Ternary operator:
+        ///     Takes in three values, outputs one value.
+        pub fn ternary(operator_fn: OperatorFunctionType) OperatorDefinitionType {
+            return OperatorDefinitionType.init(3, 1, operator_fn) catch unreachable;
+        }
+
+        /// Ease-of-use printing function, that uses an external context for printing.
+        /// The writer context must implement the following function:
+        ///     fn print(<self type>, comptime []const u8, anytype)
+        /// TODO: Check that writer_ctx implements the required interface.
+        pub fn tryPrint(self: *OperatorDefinitionType, writer_ctx: anytype) !void {
+            try writer_ctx.print("IN[{d}] => OUT[{d}]", .{ self.in_arity, self.out_arity });
+        }
+    };
+
+    /// Associates a symbol to an operator definition.
+    /// TODO: Describe this more thoroughly.
+    pub const SymbolicOperatorType = struct {
+        // The way the operator is referenced
+        // when it is looked up in the data store.
+        // TODO: Think if this is necessary.
+        symbol: SymbolicType,
+        // The definition of the operator itself
+        operator_definition: OperatorDefinitionType,
+
+        /// Initializes a symbolic operator.
+        pub fn init(symbol: SymbolicType, operator_definition: OperatorDefinitionType) SymbolicOperatorType {
+            return SymbolicOperatorType{
+                .symbol = symbol,
+                .operator_definition = operator_definition,
+            };
+        }
+
+        /// De-initializes the symbolic operator. Will also clean up the memory of the symbol, if allocated.
+        pub fn deinit(self: *SymbolicOperatorType, allocator: std.mem.Allocator) void {
+            self.symbol.deinit(allocator);
+        }
+
+        /// Ease-of-use printing function, that uses an external context for printing.
+        /// The writer context must implement the following function:
+        ///     fn print(<self type>, comptime []const u8, anytype)
+        /// TODO: Check that writer_ctx implements the required interface.
+        pub fn tryPrint(self: *SymbolicOperatorType, writer_ctx: anytype) !void {
+            try self.symbol.tryPrint(writer_ctx);
+            try writer_ctx.print("(", .{});
+            try self.operator_definition.tryPrint(writer_ctx);
+            try writer_ctx.print(")", .{});
         }
     };
 
