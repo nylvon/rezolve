@@ -144,6 +144,36 @@ pub fn OptimalAutoUnionWrapper(comptime Types: []const type) type {
             }
         }
 
+        /// Returns a pointer to the current active union field given by the type specified.
+        /// If the active field is of the type given, a pointer to it will be returned.
+        /// Otherwise, the code is unreachable. Use at your own peril.
+        pub fn GetReferenceUnsafe(self: *@This(), T: type) *T {
+            switch (self.inner) {
+                inline else => |*self_value| {
+                    const self_type = @TypeOf(self_value.*);
+                    if (self_type == T) {
+                        return self_value;
+                    }
+                    unreachable;
+                },
+            }
+        }
+
+        /// Returns a pointer to the current active union field given by the type specified.
+        /// If the active field is of the type given, a pointer to it will be returned.
+        /// Otherwise an error will be returned.
+        pub fn GetReference(self: *@This(), T: type) !*T {
+            switch (self.inner) {
+                inline else => |*self_value| {
+                    const self_type = @TypeOf(self_value.*);
+                    if (self_type == T) {
+                        return self_value;
+                    }
+                    return Errors.TypeNotFoundInSelf;
+                },
+            }
+        }
+
         /// Converts another union's active field to the current one's, in type and value.
         /// This does not do any checking. Use at your own peril.
         pub fn ConvertToThisUnsafe(self: @This(), OtherBaseTypes: []const type, OtherUnion: *OptimalAutoUnionWrapper(OtherBaseTypes)) void {
@@ -176,9 +206,6 @@ pub fn OptimalAutoUnionWrapper(comptime Types: []const type) type {
                 },
             }
         }
-
-        // TODO: Add more on top of this, if needed.
-        // TODO: Move on to the defining input nodes with this.
     };
 }
 
@@ -374,4 +401,17 @@ test "OptimalAutoUnionWrapper conversion tests" {
     // Can't convert the i32 from val_1 to any of the types of val_3
     // because val_3 can only hold a []const u8, and not an i32.
     try expectError(o1.Errors.TypeNotFoundInTarget, val_1.ConvertToThis(o3.BaseTypes, &val_3));
+
+    // this should not fail, val_2 has an i32 as its active field
+    // a reference to it should be possible to acquire
+    const val_2_ref = try val_2.GetReference(i32);
+
+    // modifying the value of the i32 active field of val_2 through this reference
+    val_2_ref.* = 20;
+
+    // the value should be modified now
+    const modified_value_2 = try val_2.GetValue(i32);
+
+    // and it should be 20.
+    try expect(modified_value_2 == 20);
 }
