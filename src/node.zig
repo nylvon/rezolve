@@ -24,7 +24,16 @@ pub fn NodeTypeFunction(comptime InputTypes: ?[]const type, comptime OutputTypes
     const InputBusReferenceType = DataBusReferenceType(utils.TypeArrayToPointerArrayOptional(InputTypes));
     const OutputBusReferenceType = DataBusReferenceType(OutputTypes);
 
-    return comptime *const fn (InputBusReferenceType, OutputBusReferenceType) anyerror!void;
+    switch (InputBusReferenceType) {
+        void => switch (OutputBusReferenceType) {
+            void => return comptime *const fn () anyerror!void,
+            else => return comptime *const fn (OutputBusReferenceType) anyerror!void,
+        },
+        else => switch (OutputBusReferenceType) {
+            void => return comptime *const fn (InputBusReferenceType) anyerror!void,
+            else => return comptime *const fn (InputBusReferenceType, OutputBusReferenceType) anyerror!void,
+        },
+    }
 }
 
 /// Returns the type of a data bus by creating an array of Optimal Auto Union Wrappers
@@ -75,6 +84,7 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
             LacksBus,
         };
 
+        /// Ease of use enum to use in functions that can refer to either bus.
         pub const Bus = enum { Input, Output };
 
         /// If the index is within bounds, this will return void.
@@ -99,12 +109,21 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
             self.input_data_ports[index] = try InputDataBusEntryType.Create(*T, target);
         }
 
-        /// TODO: Implement this.
+        /// TODO: Implement this. Maybe?
         // pub fn SetOutput()
 
         /// Maps the current inputs to the outputs, using the function of the node.
         pub fn Execute(self: *@This()) !void {
-            try Function(&self.input_data_ports, &self.output_data_ports);
+            switch (InputDataBusType) {
+                void => switch (OutputDataBusType) {
+                    void => return Function(),
+                    else => return Function(&self.output_data_ports),
+                },
+                else => switch (OutputDataBusType) {
+                    void => return Function(&self.input_data_ports),
+                    else => return Function(&self.input_data_ports, &self.output_data_ports),
+                },
+            }
         }
 
         /// Creates an empty node of this type.

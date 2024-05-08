@@ -105,10 +105,17 @@ pub fn OptimalAutoUnionWrapper(comptime Types: []const type) type {
     return struct {
         inner: OAUType,
 
+        /// The internal optimal auto union type generated.
+        /// Written here for ease of use and access.
         pub const OAUType = OptimalAutoUnion(Types);
+        /// An embedding of the types that generated this one for reflection.
         pub const BaseTypes = Types;
+        /// The naming function used for the optimal auto union wrapper
+        /// is always going to be the comptime type name field namer
+        /// so that reflection is really straight forward with builtins.
         pub const FieldNamingFunction = ComptimeTypeNameFieldNamer;
 
+        /// The error set for this type.
         pub const Errors = error{
             TypeNotFoundInTarget,
             TypeNotFoundInSelf,
