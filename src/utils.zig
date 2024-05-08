@@ -12,6 +12,17 @@ pub fn TypeArrayToPointerArray(comptime Types: []const type) []const type {
     }
 }
 
+/// Converts an optional array of types to an array of types in (non-const) pointer form.
+/// If the array is null, the result will also be null.
+/// Used in node.zig for consistency.
+pub fn TypeArrayToPointerArrayOptional(comptime Types: ?[]const type) ?[]const type {
+    comptime {
+        if (Types) |Ts| {
+            return TypeArrayToPointerArray(Ts);
+        } else return null;
+    }
+}
+
 /// Returns an array of types that is a version of the array of types 'Types'
 /// but with all duplicates removed.
 pub fn ReduceTypeArray(comptime Types: []const type) []const type {
