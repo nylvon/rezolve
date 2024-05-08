@@ -128,16 +128,7 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
 
         /// Creates an empty node of this type.
         pub fn Create() @This() {
-            switch (InputDataBusType) {
-                void => switch (OutputDataBusType) {
-                    void => return .{},
-                    else => return .{ .output_data_ports = undefined },
-                },
-                else => switch (OutputDataBusType) {
-                    void => return .{ .input_data_ports = undefined },
-                    else => return .{ .input_data_ports = undefined, .output_data_ports = undefined },
-                },
-            }
+            return .{ .input_data_ports = undefined, .output_data_ports = undefined };
         }
     };
 }
@@ -207,7 +198,7 @@ test "Function Tests" {
 }
 
 // Same test, but now with the NodeType
-test "NodeType Binary Test" {
+test "NodeType Binary Test, simulated inputs" {
     // the input and output types
     const input_types = &[_]type{ i32, i32 };
     const output_types = &[_]type{i32};
@@ -250,4 +241,167 @@ test "NodeType Binary Test" {
     try expect(in_1_value_after.* == in_1_forced);
     try expect(in_2_value_after.* == in_2_forced);
     try expect(out_1_value_after == out_1_value_after_expected);
+}
+
+/// Generates a function that generates a value of type 'T'
+/// Example usage:
+///     const Generate10asI32 = GenerateAs(i32).WithValue(10);
+///     const my_value = Generate10asI32();
+pub fn GenerateAs(comptime T: type) *const fn (T) (*const fn () T) {
+    return struct {
+        pub fn WithValue(comptime value: T) *const fn () T {
+            return struct {
+                pub fn Generate() T {
+                    return value;
+                }
+            }.Generate;
+        }
+    }.WithValue;
+}
+
+/// Generates a function for an unary generator node.
+pub fn GeneratorFunction(comptime OutputTypes: []const type, comptime T: type, comptime Value: T) NodeTypeFunction(null, OutputTypes) {
+    return struct {
+        pub fn Generate(outputs: DataBusReferenceType(OutputTypes)) !void {
+            const out_0 = try outputs[0].GetReference(T);
+            out_0.* = Value;
+        }
+    }.Generate;
+}
+
+// Same test, but now with real nodes that are generating the input values through cascading.
+test "NodeType Binary Test, real inputs" {
+    // Defining the output types of the generators
+    const generator_out_types = &[_]type{i32};
+    // The values of the generators
+    const generator_1_value: i32 = 10;
+    const generator_2_value: i32 = 20;
+    // The functions of the generator nodes
+    const generator_1_function = comptime GeneratorFunction(generator_out_types, i32, generator_1_value);
+    const generator_2_function = comptime GeneratorFunction(generator_out_types, i32, generator_2_value);
+    // The actual generator node types
+    const generator_1_node_type = NodeType(null, generator_out_types, generator_1_function);
+    const generator_2_node_type = NodeType(null, generator_out_types, generator_2_function);
+
+    // Defining the input and output types of the adder
+    const adder_in_types = &[_]type{ i32, i32 };
+    const adder_out_types = &[_]type{i32};
+    // Defining the actual adder node type
+    const adder_node_type = NodeType(adder_in_types, adder_out_types, BinaryAddFn);
+
+    // instantiating the nodes
+    var generator_1 = generator_1_node_type.Create();
+    var generator_2 = generator_2_node_type.Create();
+    var adder_1 = adder_node_type.Create();
+
+    // getting the references to the outputs, these will now be *i32
+    const generator_1_output_reference = try generator_1.output_data_ports[0].GetReference(i32);
+    const generator_2_output_reference = try generator_2.output_data_ports[0].GetReference(i32);
+
+    // set the inputs to the references
+    try adder_1.SetInput(0, i32, @constCast(generator_1_output_reference));
+    try adder_1.SetInput(1, i32, @constCast(generator_2_output_reference));
+
+    //
+    //  STAGE 0
+    //      Generators are not outputting anything, outputs should be zero.
+    //      Addition shoud yield 0.
+    //
+
+    // make sure that the outputs of the generators are outputting the right value
+    try expect(generator_1_output_reference.* == 0);
+    try expect(generator_2_output_reference.* == 0);
+
+    // make sure that the inputs and outputs of the adder are correct
+    const adder_1_input_1_stage_0_before = try adder_1.input_data_ports[0].GetValue(*i32);
+    const adder_1_input_2_stage_0_before = try adder_1.input_data_ports[1].GetValue(*i32);
+    const adder_1_output_1_stage_0_before = try adder_1.output_data_ports[0].GetValue(i32);
+
+    // check
+    try expect(adder_1_input_1_stage_0_before.* == 0);
+    try expect(adder_1_input_2_stage_0_before.* == 0);
+    try expect(adder_1_output_1_stage_0_before == 0);
+
+    // try to add 0 and 0 to get 0
+    try adder_1.Execute();
+
+    const adder_1_input_1_stage_0_after = try adder_1.input_data_ports[0].GetValue(*i32);
+    const adder_1_input_2_stage_0_after = try adder_1.input_data_ports[1].GetValue(*i32);
+    const adder_1_output_1_stage_0_after = try adder_1.output_data_ports[0].GetValue(i32);
+
+    // check
+    try expect(adder_1_input_1_stage_0_after.* == 0);
+    try expect(adder_1_input_2_stage_0_after.* == 0);
+    try expect(adder_1_output_1_stage_0_after == 0);
+
+    //
+    //  STAGE 1
+    //      Generator 1 should be outputting 10, whilst generator 2 should be outputting 0.
+    //      Addition shoud yield 10.
+    //
+
+    // enable generator 1
+    try generator_1.Execute();
+
+    // make sure that the outputs of the generators are outputting the right value
+    try expect(generator_1_output_reference.* == generator_1_value);
+    try expect(generator_2_output_reference.* == 0);
+
+    // make sure that the inputs and outputs of the adder are correct
+    const adder_1_input_1_stage_1_before = try adder_1.input_data_ports[0].GetValue(*i32);
+    const adder_1_input_2_stage_1_before = try adder_1.input_data_ports[1].GetValue(*i32);
+    const adder_1_output_1_stage_1_before = try adder_1.output_data_ports[0].GetValue(i32);
+
+    // check
+    try expect(adder_1_input_1_stage_1_before.* == generator_1_value);
+    try expect(adder_1_input_2_stage_1_before.* == 0);
+    try expect(adder_1_output_1_stage_1_before == 0);
+
+    // try to add 10 and 0 to get 10
+    try adder_1.Execute();
+
+    const adder_1_input_1_stage_1_after = try adder_1.input_data_ports[0].GetValue(*i32);
+    const adder_1_input_2_stage_1_after = try adder_1.input_data_ports[1].GetValue(*i32);
+    const adder_1_output_1_stage_1_after = try adder_1.output_data_ports[0].GetValue(i32);
+
+    // check
+    try expect(adder_1_input_1_stage_1_after.* == generator_1_value);
+    try expect(adder_1_input_2_stage_1_after.* == 0);
+    try expect(adder_1_output_1_stage_1_after == generator_1_value);
+
+    //
+    //  STAGE 2
+    //      Generator 1 should be outputting 10, whilst generator 2 should be outputting 20.
+    //      Addition shoud yield 30.
+    //
+
+    // enable generator 2 as well
+    try generator_2.Execute();
+
+    // make sure that the outputs of the generators are outputting the right value
+    try expect(generator_1_output_reference.* == generator_1_value);
+    try expect(generator_2_output_reference.* == generator_2_value);
+
+    // make sure that the inputs of the adder are correct
+    const adder_1_input_1_stage_2_before = try adder_1.input_data_ports[0].GetValue(*i32);
+    const adder_1_input_2_stage_2_before = try adder_1.input_data_ports[1].GetValue(*i32);
+    const adder_1_output_1_stage_2_before = try adder_1.output_data_ports[0].GetValue(i32);
+
+    // check
+    try expect(adder_1_input_1_stage_2_before.* == generator_1_value);
+    try expect(adder_1_input_2_stage_2_before.* == generator_2_value);
+    // we should expect the last result to still remain in the buffer.
+    try expect(adder_1_output_1_stage_2_before == generator_1_value);
+
+    // try to add 10 and 20 to get 30
+    try adder_1.Execute();
+
+    const adder_1_input_1_stage_2_after = try adder_1.input_data_ports[0].GetValue(*i32);
+    const adder_1_input_2_stage_2_after = try adder_1.input_data_ports[1].GetValue(*i32);
+    const adder_1_output_1_stage_2_after = try adder_1.output_data_ports[0].GetValue(i32);
+
+    // check
+    try expect(adder_1_input_1_stage_2_after.* == generator_1_value);
+    try expect(adder_1_input_2_stage_2_after.* == generator_2_value);
+    try expect(adder_1_output_1_stage_2_after == generator_1_value + generator_2_value);
 }
