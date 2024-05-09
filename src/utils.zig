@@ -100,3 +100,30 @@ pub fn ComptimeArrayMerge(comptime T: type, comptime target: []const T, comptime
     };
     return &result;
 }
+
+/// The functions used to name fields must share this signature.
+pub const ComptimeFieldNameFn = *const fn (comptime type, comptime usize) [:0]const u8;
+
+/// The default index naming function for auto containers.
+/// Given a type for the field and the field index, returns a string like this:
+/// "field_" + index + "_" + @typeName(T)
+/// Eg: For index = 3, T = i32, the string will be "field_3_i32"
+pub fn ComptimeDefaultFieldNamer(comptime T: type, comptime index: usize) [:0]const u8 {
+    return std.fmt.comptimePrint("field_{d}_{s}", .{ index, @typeName(T) });
+}
+
+/// A naming function that names the field just the type name of the field.
+/// The 'index' parameter is discarded, but it is still here for compatibility.
+/// Used for optimal auto containers, where there's only one field for each type.
+pub fn ComptimeTypeNameFieldNamer(comptime T: type, comptime index: usize) [:0]const u8 {
+    _ = index;
+    return std.fmt.comptimePrint("{s}", .{@typeName(T)});
+}
+
+/// A naming function that names the field just the index of it.
+/// The 'T' parameter is discarded, but it is still here for compatibility.
+/// Used for optimal auto containers, where there's multiple fields with the same type.
+pub fn ComptimeIndexFieldNamer(comptime T: type, comptime index: usize) [:0]const u8 {
+    _ = T;
+    return std.fmt.comptimePrint("{d}", .{index});
+}

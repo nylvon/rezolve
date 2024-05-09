@@ -13,25 +13,9 @@ const expectEqual = testing.expectEqual;
 const expect = testing.expect;
 const expectError = testing.expectError;
 const utils = @import("utils.zig");
-
-/// The functions used to name fields must share this signature.
-pub const ComptimeFieldNameFn = *const fn (comptime type, comptime usize) [:0]const u8;
-
-/// The default index naming function for auto-unions.
-/// Given a type for the field and the field index, returns a string like this:
-/// "field_" + index + "_" + @typeName(T)
-/// Eg: For index = 3, T = i32, the string will be "field_3_i32"
-pub fn ComptimeDefaultFieldNamer(comptime T: type, comptime index: usize) [:0]const u8 {
-    return std.fmt.comptimePrint("field_{d}_{s}", .{ index, @typeName(T) });
-}
-
-/// A naming function that names the field just the type name of the field.
-/// The 'index' parameter is discarded, but is required for the ABI.
-/// Used for optimal auto unions, where there's only one field for each type.
-pub fn ComptimeTypeNameFieldNamer(comptime T: type, comptime index: usize) [:0]const u8 {
-    _ = index;
-    return std.fmt.comptimePrint("{s}", .{@typeName(T)});
-}
+const ComptimeFieldNameFn = utils.ComptimeFieldNameFn;
+const ComptimeDefaultFieldNamer = utils.ComptimeDefaultFieldNamer;
+const ComptimeTypeNameFieldNamer = utils.ComptimeTypeNameFieldNamer;
 
 ///////////////////////////////////////////////////////////////////////////////////
 // Types
