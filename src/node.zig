@@ -61,6 +61,8 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
         /// The base types that were used in constructing this type, if not null;
         pub const InputTypesBase = if (InputTypes) |IT| IT else void;
         pub const OutputTypesBase = if (OutputTypes) |OT| OT else void;
+        pub const InputTypesBaseLength = if (InputTypes) |IT| IT.len else @as(usize, 0);
+        pub const OutputTypesBaseLength = if (OutputTypes) |OT| OT.len else @as(usize, 0);
 
         /// The derived optimal auto union wrapper types for the entries to the data buses.
         pub const InputDataBusEntryType = AutoUnion(utils.TypeArrayToPointerArray(InputTypesBase));
@@ -89,24 +91,75 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
 
         /// If the index is within bounds, this will return void.
         /// If it's not, or if the bus doesn't exist, this will return an error.
-        pub fn IndexCheck(self: *@This(), index: usize, bus: Bus) !void {
+        pub fn IndexCheck(index: usize, bus: Bus) !void {
             switch (bus) {
                 .Input => {
-                    comptime if (InputDataBusType == void) return Errors.LacksBus;
-                    if (index >= self.input_data_ports.len) return Errors.InvalidIndex;
+                    if (InputTypesBaseLength == 0) return Errors.LacksBus;
+                    if (index >= InputTypesBaseLength) return Errors.InvalidIndex;
                 },
                 .Output => {
-                    comptime if (OutputDataBusType == void) return Errors.LacksBus;
-                    if (index >= self.output_data_ports.len) return Errors.InvalidIndex;
+                    if (OutputTypesBaseLength == 0) return Errors.LacksBus;
+                    if (index >= OutputTypesBaseLength) return Errors.InvalidIndex;
                 },
             }
         }
 
         /// Sets an entry of the input data bus to point to a target.
         pub fn SetInput(self: *@This(), index: usize, T: type, target: *T) !void {
-            try self.IndexCheck(index, .Input);
+            try IndexCheck(index, .Input);
 
             self.input_data_ports[index] = try InputDataBusEntryType.Create(*T, target);
+        }
+
+        /// Gets the value of a data entry on the specified bus at the given index.
+        /// If the input bus is mentioned, the pointer will be dereferenced.
+        /// NOTE: The if checks are because the compiler sometimes can't figure out that it's not a void type
+        ///       that we're indexing, even though it should be known at this stage.
+        pub fn GetValue(self: *@This(), index: usize, bus: Bus, T: type) !T {
+            try IndexCheck(index, bus);
+            switch (bus) {
+                .Input => {
+                    if (InputDataBusType != void) {
+                        const input_pointer = try self.input_data_ports[index].GetValue(*T);
+                        return input_pointer.*;
+                    } else unreachable;
+                },
+                .Output => {
+                    if (OutputDataBusType != void) {
+                        return try self.output_data_ports[index].GetValue(T);
+                    } else unreachable;
+                },
+            }
+        }
+
+        /// Gets the reference to a data entry on the specified bus at the given index.
+        /// NOTE: The if checks are because the compiler sometimes can't figure out that it's not a void type
+        ///       that we're indexing, even though it should be known at this stage.
+        pub fn GetReference(self: *@This(), index: usize, bus: Bus, T: type) !*T {
+            try IndexCheck(index, bus);
+            switch (bus) {
+                .Input => {
+                    if (InputDataBusType != void) {
+                        const input_pointer = try self.input_data_ports[index].GetReference(*T);
+                        return input_pointer.*;
+                    } else unreachable;
+                },
+                .Output => {
+                    if (OutputDataBusType != void) {
+                        return try self.output_data_ports[index].GetReference(T);
+                    } else unreachable;
+                },
+            }
+        }
+
+        /// This will return the original type of the data entry in the data bus definitions.
+        /// If the input bus is selected, the type will be in (non-const) pointer form.
+        pub fn GetType(bus: Bus, index: usize) !type {
+            try IndexCheck(index, bus);
+            switch (bus) {
+                .Input => return *InputTypesBase[index],
+                .Output => return OutputTypesBase[index],
+            }
         }
 
         /// TODO: Implement this. Maybe?
@@ -217,30 +270,20 @@ test "NodeType Binary Test, simulated inputs" {
     try example_node.SetInput(0, i32, @constCast(&in_1_forced));
     try example_node.SetInput(1, i32, @constCast(&in_2_forced));
 
-    // check the values on the data bus before executing the function
-    const in_1_value_before = try example_node.input_data_ports[0].GetValue(*i32);
-    const in_2_value_before = try example_node.input_data_ports[1].GetValue(*i32);
-    const out_1_value_before = try example_node.output_data_ports[0].GetValue(i32);
-
     // check
-    try expect(in_1_value_before.* == in_1_forced);
-    try expect(in_2_value_before.* == in_2_forced);
-    try expect(out_1_value_before == 0);
+    // the function has not been executed, so the result should be zero.
+    try expect(try example_node.GetValue(0, .Input, i32) == in_1_forced);
+    try expect(try example_node.GetValue(1, .Input, i32) == in_2_forced);
+    try expect(try example_node.GetValue(0, .Output, i32) == 0);
 
     // try executing, should not fail
     try example_node.Execute();
 
-    // get the values again, and check that the inputs have not changed
-    // but the output should have changed how we expect it to have.
-    const in_1_value_after = try example_node.input_data_ports[0].GetValue(*i32);
-    const in_2_value_after = try example_node.input_data_ports[1].GetValue(*i32);
-    const out_1_value_after = try example_node.output_data_ports[0].GetValue(i32);
-    const out_1_value_after_expected = in_1_forced + in_2_forced;
-
     // check
-    try expect(in_1_value_after.* == in_1_forced);
-    try expect(in_2_value_after.* == in_2_forced);
-    try expect(out_1_value_after == out_1_value_after_expected);
+    // the function has been executed, so the result should be the one we're anticipating.
+    try expect(try example_node.GetValue(0, .Input, i32) == in_1_forced);
+    try expect(try example_node.GetValue(1, .Input, i32) == in_2_forced);
+    try expect(try example_node.GetValue(0, .Output, i32) == in_1_forced + in_2_forced);
 }
 
 /// Generates a function that generates a value of type 'T'
@@ -294,13 +337,9 @@ test "NodeType Binary Test, real inputs" {
     var generator_2 = generator_2_node_type.Create();
     var adder_1 = adder_node_type.Create();
 
-    // getting the references to the outputs, these will now be *i32
-    const generator_1_output_reference = try generator_1.output_data_ports[0].GetReference(i32);
-    const generator_2_output_reference = try generator_2.output_data_ports[0].GetReference(i32);
-
-    // set the inputs to the references
-    try adder_1.SetInput(0, i32, @constCast(generator_1_output_reference));
-    try adder_1.SetInput(1, i32, @constCast(generator_2_output_reference));
+    // set the inputs to the generator outputs
+    try adder_1.SetInput(0, i32, try generator_1.GetReference(0, .Output, i32));
+    try adder_1.SetInput(1, i32, try generator_2.GetReference(0, .Output, i32));
 
     //
     //  STAGE 0
@@ -309,30 +348,21 @@ test "NodeType Binary Test, real inputs" {
     //
 
     // make sure that the outputs of the generators are outputting the right value
-    try expect(generator_1_output_reference.* == 0);
-    try expect(generator_2_output_reference.* == 0);
+    try expect(try generator_1.GetValue(0, .Output, i32) == 0);
+    try expect(try generator_2.GetValue(0, .Output, i32) == 0);
 
-    // make sure that the inputs and outputs of the adder are correct
-    const adder_1_input_1_stage_0_before = try adder_1.input_data_ports[0].GetValue(*i32);
-    const adder_1_input_2_stage_0_before = try adder_1.input_data_ports[1].GetValue(*i32);
-    const adder_1_output_1_stage_0_before = try adder_1.output_data_ports[0].GetValue(i32);
-
-    // check
-    try expect(adder_1_input_1_stage_0_before.* == 0);
-    try expect(adder_1_input_2_stage_0_before.* == 0);
-    try expect(adder_1_output_1_stage_0_before == 0);
+    // the inputs should be the same as the generators' outputs.
+    try expect(try adder_1.GetValue(0, .Input, i32) == 0);
+    try expect(try adder_1.GetValue(1, .Input, i32) == 0);
+    try expect(try adder_1.GetValue(0, .Output, i32) == 0);
 
     // try to add 0 and 0 to get 0
     try adder_1.Execute();
 
-    const adder_1_input_1_stage_0_after = try adder_1.input_data_ports[0].GetValue(*i32);
-    const adder_1_input_2_stage_0_after = try adder_1.input_data_ports[1].GetValue(*i32);
-    const adder_1_output_1_stage_0_after = try adder_1.output_data_ports[0].GetValue(i32);
-
     // check
-    try expect(adder_1_input_1_stage_0_after.* == 0);
-    try expect(adder_1_input_2_stage_0_after.* == 0);
-    try expect(adder_1_output_1_stage_0_after == 0);
+    try expect(try adder_1.GetValue(0, .Input, i32) == 0);
+    try expect(try adder_1.GetValue(1, .Input, i32) == 0);
+    try expect(try adder_1.GetValue(0, .Output, i32) == 0);
 
     //
     //  STAGE 1
@@ -344,30 +374,21 @@ test "NodeType Binary Test, real inputs" {
     try generator_1.Execute();
 
     // make sure that the outputs of the generators are outputting the right value
-    try expect(generator_1_output_reference.* == generator_1_value);
-    try expect(generator_2_output_reference.* == 0);
+    try expect(try generator_1.GetValue(0, .Output, i32) == generator_1_value);
+    try expect(try generator_2.GetValue(0, .Output, i32) == 0);
 
-    // make sure that the inputs and outputs of the adder are correct
-    const adder_1_input_1_stage_1_before = try adder_1.input_data_ports[0].GetValue(*i32);
-    const adder_1_input_2_stage_1_before = try adder_1.input_data_ports[1].GetValue(*i32);
-    const adder_1_output_1_stage_1_before = try adder_1.output_data_ports[0].GetValue(i32);
+    // the inputs should be the same as the generators' outputs.
+    try expect(try adder_1.GetValue(0, .Input, i32) == generator_1_value);
+    try expect(try adder_1.GetValue(1, .Input, i32) == 0);
+    try expect(try adder_1.GetValue(0, .Output, i32) == 0);
 
-    // check
-    try expect(adder_1_input_1_stage_1_before.* == generator_1_value);
-    try expect(adder_1_input_2_stage_1_before.* == 0);
-    try expect(adder_1_output_1_stage_1_before == 0);
-
-    // try to add 10 and 0 to get 10
+    // try to add 10 and 0 to get 0
     try adder_1.Execute();
 
-    const adder_1_input_1_stage_1_after = try adder_1.input_data_ports[0].GetValue(*i32);
-    const adder_1_input_2_stage_1_after = try adder_1.input_data_ports[1].GetValue(*i32);
-    const adder_1_output_1_stage_1_after = try adder_1.output_data_ports[0].GetValue(i32);
-
     // check
-    try expect(adder_1_input_1_stage_1_after.* == generator_1_value);
-    try expect(adder_1_input_2_stage_1_after.* == 0);
-    try expect(adder_1_output_1_stage_1_after == generator_1_value);
+    try expect(try adder_1.GetValue(0, .Input, i32) == generator_1_value);
+    try expect(try adder_1.GetValue(1, .Input, i32) == 0);
+    try expect(try adder_1.GetValue(0, .Output, i32) == generator_1_value);
 
     //
     //  STAGE 2
@@ -379,29 +400,20 @@ test "NodeType Binary Test, real inputs" {
     try generator_2.Execute();
 
     // make sure that the outputs of the generators are outputting the right value
-    try expect(generator_1_output_reference.* == generator_1_value);
-    try expect(generator_2_output_reference.* == generator_2_value);
+    try expect(try generator_1.GetValue(0, .Output, i32) == generator_1_value);
+    try expect(try generator_2.GetValue(0, .Output, i32) == generator_2_value);
 
-    // make sure that the inputs of the adder are correct
-    const adder_1_input_1_stage_2_before = try adder_1.input_data_ports[0].GetValue(*i32);
-    const adder_1_input_2_stage_2_before = try adder_1.input_data_ports[1].GetValue(*i32);
-    const adder_1_output_1_stage_2_before = try adder_1.output_data_ports[0].GetValue(i32);
-
-    // check
-    try expect(adder_1_input_1_stage_2_before.* == generator_1_value);
-    try expect(adder_1_input_2_stage_2_before.* == generator_2_value);
+    // the inputs should be the same as the generators' outputs.
+    try expect(try adder_1.GetValue(0, .Input, i32) == generator_1_value);
+    try expect(try adder_1.GetValue(1, .Input, i32) == generator_2_value);
     // we should expect the last result to still remain in the buffer.
-    try expect(adder_1_output_1_stage_2_before == generator_1_value);
+    try expect(try adder_1.GetValue(0, .Output, i32) == generator_1_value);
 
     // try to add 10 and 20 to get 30
     try adder_1.Execute();
 
-    const adder_1_input_1_stage_2_after = try adder_1.input_data_ports[0].GetValue(*i32);
-    const adder_1_input_2_stage_2_after = try adder_1.input_data_ports[1].GetValue(*i32);
-    const adder_1_output_1_stage_2_after = try adder_1.output_data_ports[0].GetValue(i32);
-
     // check
-    try expect(adder_1_input_1_stage_2_after.* == generator_1_value);
-    try expect(adder_1_input_2_stage_2_after.* == generator_2_value);
-    try expect(adder_1_output_1_stage_2_after == generator_1_value + generator_2_value);
+    try expect(try adder_1.GetValue(0, .Input, i32) == generator_1_value);
+    try expect(try adder_1.GetValue(1, .Input, i32) == generator_2_value);
+    try expect(try adder_1.GetValue(0, .Output, i32) == generator_1_value + generator_2_value);
 }
