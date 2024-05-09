@@ -149,6 +149,24 @@ pub fn OptimalAutoUnionWrapper(comptime Types: []const type) type {
             }
         }
 
+        /// Creates an instance of this type with an undefined value.
+        /// Does no type checking whatsoever.
+        /// Use at your own peril.
+        pub fn CreateUndefiendUnsafe(T: type) @This() {
+            return .{ .inner = @unionInit(OAUType, FieldNamingFunction(T, 0), undefined) };
+        }
+
+        /// Creates an instance of this type with an undefined value.
+        /// Checks whether the type exists.
+        /// If not, it will return an error.
+        pub fn CreateUndefined(T: type) !@This() {
+            inline for (BaseTypes) |BT| {
+                if (BT == T) {
+                    return CreateUndefiendUnsafe(T);
+                } else return Errors.TypeNotFoundInSelf;
+            }
+        }
+
         /// Gets the value of the current active union field given by the type specified.
         /// If the active field is of the type given, the value will be returned.
         /// Otherwise, the code is unreachable. Use at your own peril.
