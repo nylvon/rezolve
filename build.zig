@@ -88,10 +88,10 @@ pub fn build(b: *std.Build) void {
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
-    const autounion_test_step = b.step("test-autounion", "Run autounion tests");
+    const autounion_test_step = b.step("test-autounion", "Run auto-union tests");
     autounion_test_step.dependOn(&run_autounion_tests.step);
 
-    const node_test_step = b.step("test-node", "Run autounion tests");
+    const node_test_step = b.step("test-node", "Run node tests");
     node_test_step.dependOn(&run_node_tests.step);
 
     // Similar to creating the run step earlier, this exposes a `test` step to

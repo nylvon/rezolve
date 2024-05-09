@@ -49,10 +49,17 @@ pub fn DataBusType(comptime Types: ?[]const type) type {
 pub fn DataBusReferenceType(comptime Types: ?[]const type) type {
     return if (Types) |Ts| *[Ts.len]AutoUnion(Ts) else void;
 }
-
-/// PLACEHOLDER: This returns a node type with pointers to the input types and values of the output types.
-///              Nodes like these can be safely intertwined and chained, to form a graph of nodes.
-/// TODO: Write a better, more throughout description here.
+/// Returns a node type that has an input data bus, an output data bus, and a function that maps
+/// the inputs to the outputs.
+/// The input types get converted to an optimal auto union wrapper, and then the input data bus is formed
+/// as an array of these new union types. The same goes for the output data bus.
+/// The optimal auto union wrapper is used because of its flexibility as a type, not having the same
+/// issues that a generated auto struct would have, such as not being able to access its fields because
+/// the @field builtin can only take in field names that are known at compile time.
+/// This adds its own complexities, but the important take aways are:
+///     This function returns a node type.
+///     You can connect multiple nodes between eachother (and other types) with some type agnostic functions.
+///     They are the backbone of the ReZolve system.
 pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]const type, comptime FunctionReference: NodeTypeFunction(InputTypes, OutputTypes)) type {
     return struct {
         input_data_ports: InputDataBusType,
@@ -72,6 +79,10 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
         pub const InputDataBusType = DataBusType(utils.TypeArrayToPointerArrayOptional(InputTypes));
         pub const OutputDataBusType = DataBusType(OutputTypes);
 
+        /// The default values of the data buses.
+        pub const DefaultInputDataBusState = GetDefaultInputDataBusState();
+        pub const DefaultOutputDataBusState = GetDefaultOutputDataBusState();
+
         /// The derived function type, inferred from where it was created, in the parameter type.
         pub const FunctionType = @TypeOf(Function);
 
@@ -79,8 +90,7 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
         /// Ideally the function should be marked as inline, too.
         pub const Function = FunctionReference;
 
-        /// The error set used for nodes.
-        /// TODO: Write a more coherent description.
+        /// The complete error set used for nodes.
         pub const Errors = error{
             InvalidIndex,
             LacksBus,
@@ -109,6 +119,13 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
             try IndexCheck(index, .Input);
 
             self.input_data_ports[index] = try InputDataBusEntryType.Create(*T, target);
+        }
+
+        /// Sets the target's underlying pointer to point to an entry of the output data bus.
+        pub fn SetOutput(self: *@This(), index: usize, T: type, target: **T) !void {
+            try IndexCheck(index, .Output);
+
+            target.* = try self.output_data_ports[index].GetReference(T);
         }
 
         /// Gets the value of a data entry on the specified bus at the given index.
@@ -152,6 +169,18 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
             }
         }
 
+        /// Gets a double pointer to an entry on the input data bus.
+        /// This is used in order to modify an input pointer from the outside.
+        /// Used for the SetOutput function in the context of other nodes.
+        pub fn PointToInput(self: *@This(), index: usize, T: type) !**T {
+            try IndexCheck(index, .Input);
+
+            if (InputDataBusType != void) {
+                const input_double_pointer = try self.input_data_ports[index].GetReference(*T);
+                return input_double_pointer;
+            } else unreachable;
+        }
+
         /// This will return the original type of the data entry in the data bus definitions.
         /// If the input bus is selected, the type will be in (non-const) pointer form.
         pub fn GetType(bus: Bus, index: usize) !type {
@@ -161,9 +190,6 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
                 .Output => return OutputTypesBase[index],
             }
         }
-
-        /// TODO: Implement this. Maybe?
-        // pub fn SetOutput()
 
         /// Maps the current inputs to the outputs, using the function of the node.
         pub fn Execute(self: *@This()) !void {
@@ -179,9 +205,40 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
             }
         }
 
+        /// Gets the default state of the input data bus type,
+        /// with all input entries having their active field
+        /// specified by the input type at their mapped index.
+        pub fn GetDefaultInputDataBusState() InputDataBusType {
+            comptime {
+                var inputs: InputDataBusType = undefined;
+                if (InputDataBusType != void) {
+                    for (utils.TypeArrayToPointerArray(InputTypes.?), 0..) |IT, i| {
+                        inputs[i] = try InputDataBusEntryType.CreateUndefined(IT);
+                    }
+                }
+                return inputs;
+            }
+        }
+
+        /// Gets the default state of the output data bus type,
+        /// with all output entries having their active field
+        /// specified by the output type at their mapped index.
+        pub fn GetDefaultOutputDataBusState() OutputDataBusType {
+            comptime {
+                var outputs: OutputDataBusType = undefined;
+                if (OutputDataBusType != void) {
+                    for (OutputTypes.?, 0..) |OT, i| {
+                        outputs[i] = try OutputDataBusEntryType.CreateUndefined(OT);
+                    }
+                }
+                return outputs;
+            }
+        }
+
         /// Creates an empty node of this type.
+        /// Sets the input and output buses to their default state.
         pub fn Create() @This() {
-            return .{ .input_data_ports = undefined, .output_data_ports = undefined };
+            return .{ .input_data_ports = DefaultInputDataBusState, .output_data_ports = DefaultOutputDataBusState };
         }
     };
 }
@@ -340,6 +397,10 @@ test "NodeType Binary Test, real inputs" {
     // set the inputs to the generator outputs
     try adder_1.SetInput(0, i32, try generator_1.GetReference(0, .Output, i32));
     try adder_1.SetInput(1, i32, try generator_2.GetReference(0, .Output, i32));
+    // OR:
+    // set the outputs of the generators as the inputs to the adder
+    try generator_1.SetOutput(0, i32, try adder_1.PointToInput(0, i32));
+    try generator_2.SetOutput(0, i32, try adder_1.PointToInput(1, i32));
 
     //
     //  STAGE 0
