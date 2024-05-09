@@ -127,3 +127,19 @@ pub fn ComptimeIndexFieldNamer(comptime T: type, comptime index: usize) [:0]cons
     _ = T;
     return std.fmt.comptimePrint("{d}", .{index});
 }
+
+/// Merges multiple lines into one, adding a predefined space before each new line character.
+pub fn ComptimeSpacedPrint(comptime spaces: usize, comptime lines: []const [:0]const u8) [:0]const u8 {
+    comptime {
+        var collapsed: [:0]const u8 = "";
+        for (lines) |line| {
+            collapsed = std.fmt.comptimePrint("{s}", .{collapsed});
+            for (0..spaces) |i| {
+                _ = i;
+                collapsed = std.fmt.comptimePrint("{s} ", .{collapsed});
+            }
+            collapsed = std.fmt.comptimePrint("{s}{s}\n", .{ collapsed, line });
+        }
+        return collapsed;
+    }
+}

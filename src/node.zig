@@ -240,6 +240,108 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
         pub fn Create() @This() {
             return .{ .input_data_ports = DefaultInputDataBusState, .output_data_ports = DefaultOutputDataBusState };
         }
+
+        /// Returns a text representation of its layout, across multiple lines.
+        pub fn LayoutToString() [][:0]const u8 {
+            // Borders
+            comptime {
+                var lines: [7][:0]const u8 = [1][:0]const u8{""} ** 7;
+
+                var input_types_line: [:0]const u8 = "|";
+                var output_types_line: [:0]const u8 = "|";
+                if (InputTypes) |ITs| {
+                    for (ITs) |IT| {
+                        input_types_line = std.fmt.comptimePrint("{s}{s}|", .{ input_types_line, @typeName(*IT) });
+                    }
+                } else input_types_line = std.fmt.comptimePrint("{s} x |", .{input_types_line});
+                if (OutputTypes) |OTs| {
+                    for (OTs) |OT| {
+                        output_types_line = std.fmt.comptimePrint("{s}{s}|", .{ output_types_line, @typeName(OT) });
+                    }
+                } else input_types_line = std.fmt.comptimePrint("{s} x |", .{.output_types_line});
+
+                if (input_types_line.len > output_types_line.len) {
+                    const delta_output = input_types_line.len - output_types_line.len;
+                    const shift = delta_output / 2;
+                    const extra = delta_output - 2 * shift;
+
+                    var pad_left: [:0]const u8 = "";
+                    var pad_right: [:0]const u8 = "";
+                    for (0..shift) |i| {
+                        _ = i;
+                        pad_left = std.fmt.comptimePrint("{s} ", .{pad_left});
+                        pad_right = std.fmt.comptimePrint("{s} ", .{pad_right});
+                    }
+                    for (0..extra) |i| {
+                        _ = i;
+                        pad_right = std.fmt.comptimePrint("{s} ", .{pad_right});
+                    }
+
+                    const new_output_line: [:0]const u8 = std.fmt.comptimePrint("|{s}{s}{s}|", .{
+                        //
+                        pad_left,
+                        output_types_line[1 .. output_types_line.len - 1],
+                        pad_right,
+                    });
+
+                    output_types_line = new_output_line;
+                } else {
+                    const delta_output = output_types_line.len - input_types_line.len;
+                    const shift = delta_output / 2;
+                    const extra = delta_output - 2 * shift;
+
+                    var pad_left: [:0]const u8 = "";
+                    var pad_right: [:0]const u8 = "";
+                    for (0..shift) |i| {
+                        _ = i;
+                        pad_left = std.fmt.comptimePrint("{s} ", .{pad_left});
+                        pad_right = std.fmt.comptimePrint("{s} ", .{pad_right});
+                    }
+                    for (0..extra) |i| {
+                        _ = i;
+                        pad_right = std.fmt.comptimePrint("{s} ", .{pad_right});
+                    }
+
+                    const new_input_line: [:0]const u8 = std.fmt.comptimePrint("|{s}{s}{s}|", .{
+                        //
+                        pad_left,
+                        input_types_line[1 .. output_types_line.len - 1],
+                        pad_right,
+                    });
+
+                    input_types_line = new_input_line;
+                }
+
+                const width = input_types_line.len;
+                var function_line: [:0]const u8 = "|";
+                var wall_line: [:0]const u8 = "--";
+
+                const f_point_1 = if (@mod(width, 2) == 0) width / 2 - 2 else width / 2 - 1;
+                const f_point_2 = width / 2 - 1;
+
+                for (0..width - 2) |i| {
+                    if (i == f_point_1) {
+                        function_line = std.fmt.comptimePrint("{s}f", .{function_line});
+                    } else if (i == f_point_2) {
+                        function_line = std.fmt.comptimePrint("{s}n", .{function_line});
+                    } else {
+                        function_line = std.fmt.comptimePrint("{s} ", .{function_line});
+                    }
+                    wall_line = std.fmt.comptimePrint("{s}-", .{wall_line});
+                }
+                function_line = std.fmt.comptimePrint("{s}|", .{function_line});
+
+                lines[0] = wall_line;
+                lines[1] = input_types_line;
+                lines[2] = wall_line;
+                lines[3] = function_line;
+                lines[4] = wall_line;
+                lines[5] = output_types_line;
+                lines[6] = wall_line;
+
+                return &lines;
+            }
+        }
     };
 }
 
@@ -478,3 +580,21 @@ test "NodeType Binary Test, real inputs" {
     try expect(try adder_1.GetValue(1, .Input, i32) == generator_2_value);
     try expect(try adder_1.GetValue(0, .Output, i32) == generator_1_value + generator_2_value);
 }
+
+// NOTE: Uncomment the code below if you want to see some visual demo for printing the layout of some complex node.
+// /// This function does absolutely nothing., but a node needs one in order to be defined.
+// fn PrintingLayoutsSample(inputs: DataBusReferenceType(utils.TypeArrayToPointerArray(&[_]type{ i64, f64, []const u8, bool })), outputs: DataBusReferenceType(&[_]type{ []f64, []bool })) !void {
+//     _ = inputs;
+//     _ = outputs;
+// }
+
+// // Uncomment this test if you want to see how the layout of a node can be inspected by visually.
+// test "Printing Layouts" {
+//     const input_types = &[_]type{ i64, f64, []const u8, bool };
+//     const output_types = &[_]type{ []f64, []bool };
+//     const node_type = NodeType(input_types, output_types, PrintingLayoutsSample);
+
+//     comptime {
+//         @compileError(utils.ComptimeSpacedPrint(0, node_type.LayoutToString()));
+//     }
+// }
