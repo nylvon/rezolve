@@ -2,6 +2,7 @@ const std = @import("std");
 const meta = std.meta;
 const builtin = std.builtin;
 const Type = builtin.Type;
+const Int = Type.Int;
 const Union = Type.Union;
 const UnionField = Type.UnionField;
 const Enum = Type.Enum;
@@ -67,12 +68,21 @@ pub fn AutoUnionTypeCustom(comptime Types: []const type, comptime FieldNamingFun
         };
     }
 
+    // Generating the optimal enum tag type
+    const optimal_tag_definition = Int{
+        .bits = std.math.log2_int_ceil(u16, enum_literals.len),
+        .signedness = .unsigned,
+    };
+
+    // This will be used as the tag for the enum
+    const optimal_tag_int = @Type(Type{ .Int = optimal_tag_definition });
+
     // The actual std.builtin.Type.Enum definition for the backing enum, to be reified into a real type.
     const enum_definition = Enum{
         .fields = &enum_literals,
         .decls = &[0]Declaration{},
         .is_exhaustive = true,
-        .tag_type = usize,
+        .tag_type = optimal_tag_int,
     };
 
     const enum_reified = @Type(Type{ .Enum = enum_definition });

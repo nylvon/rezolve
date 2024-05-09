@@ -65,8 +65,8 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
         pub const OutputTypesBaseLength = if (OutputTypes) |OT| OT.len else @as(usize, 0);
 
         /// The derived optimal auto union wrapper types for the entries to the data buses.
-        pub const InputDataBusEntryType = AutoUnion(utils.TypeArrayToPointerArray(InputTypesBase));
-        pub const OutputDataBusEntryType = AutoUnion(OutputTypesBase);
+        pub const InputDataBusEntryType = if (InputTypes) |IT| AutoUnion(utils.TypeArrayToPointerArray(IT)) else void;
+        pub const OutputDataBusEntryType = if (OutputTypes) |OT| AutoUnion(OT) else void;
 
         /// The derived data bus types.
         pub const InputDataBusType = DataBusType(utils.TypeArrayToPointerArrayOptional(InputTypes));
