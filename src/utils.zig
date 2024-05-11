@@ -68,6 +68,36 @@ test "TypeArrayToPointerArrayOptional" {
     try expect(TypeArrayToPointerArrayOptional(null) == null);
 }
 
+/// Converts an array of types to an array of optionals.
+/// Eg: [i32, *i64, *f32] -> [?i32, ?*i64, ?*f32]
+pub fn TypeArrayToOptionalArray(comptime Types: []const type) []const type {
+    comptime {
+        var optionals: [Types.len]type = undefined;
+        for (Types, 0..) |Type, i| {
+            optionals[i] = ?Type;
+        }
+        const const_opts = optionals;
+        return &const_opts;
+    }
+}
+
+test "TypeArrayToOptionalArray" {
+    // Some example types to convert to their optional form
+    const sample_types = [_]type{ i32, *i64, **f32 };
+    // The expected transformation
+    const expected_types = [_]type{ ?i32, ?*i64, ?**f32 };
+    // The actual transformation
+    const generated_types = TypeArrayToOptionalArray(&sample_types);
+
+    // They should be the same length
+    try expect(generated_types.len == expected_types.len);
+
+    // Check for each in particular.
+    inline for (expected_types, 0..) |ET, i| {
+        try expect(ET == generated_types[i]);
+    }
+}
+
 /// Returns an array of types that is a version of the array of types 'Types'
 /// but with all duplicates removed.
 pub fn ReduceTypeArray(comptime Types: []const type) []const type {
