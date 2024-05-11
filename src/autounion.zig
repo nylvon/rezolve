@@ -40,7 +40,7 @@ pub fn AutoUnionTypeCustom(comptime Types: []const type, comptime FieldNamingFun
     comptime var enum_literals: [Types.len]EnumField = undefined;
 
     // Building the fields of the union from the type array.
-    for (Types, 0..) |T, i| {
+    comptime for (Types, 0..) |T, i| {
         enum_literals[i] = EnumField{
             .name = FieldNamer(T, i),
             .value = i,
@@ -50,10 +50,10 @@ pub fn AutoUnionTypeCustom(comptime Types: []const type, comptime FieldNamingFun
             .type = T,
             .alignment = @alignOf(T),
         };
-    }
+    };
 
     // Generating the optimal enum tag type
-    const optimal_tag_definition = Int{
+    const optimal_tag_definition = comptime Int{
         .bits = std.math.log2_int_ceil(u16, enum_literals.len),
         .signedness = .unsigned,
     };
@@ -73,7 +73,7 @@ pub fn AutoUnionTypeCustom(comptime Types: []const type, comptime FieldNamingFun
 
     // The actual std.builtin.Type.Union definition, to be reified into a real type.
     const union_definition = Union{
-        .layout = .Auto,
+        .layout = .auto,
         .tag_type = enum_reified,
         .fields = &union_fields,
         .decls = &[0]Declaration{},

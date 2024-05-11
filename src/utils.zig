@@ -1,14 +1,34 @@
 const std = @import("std");
+const testing = std.testing;
+const expect = testing.expect;
 
 /// Converts an array of types to an array of types in (non-const) pointer form.
 /// Eg: [i32, i64, f32] -> [*i32, *i64, *f32]
 pub fn TypeArrayToPointerArray(comptime Types: []const type) []const type {
     comptime {
-        var pointers = [1]type{undefined} ** Types.len;
+        var pointers: [Types.len]type = undefined;
         for (Types, 0..) |Type, i| {
             pointers[i] = *Type;
         }
-        return &pointers;
+        const const_ptrs = pointers;
+        return &const_ptrs;
+    }
+}
+
+test "TypeArrayToPointerArray" {
+    // Some example types to convert to their pointer form
+    const sample_types = [_]type{ i32, *i64, **f32 };
+    // The expected transformation
+    const expected_types = [_]type{ *i32, **i64, ***f32 };
+    // The actual transformation
+    const generated_types = TypeArrayToPointerArray(&sample_types);
+
+    // They should be the same length
+    try expect(generated_types.len == expected_types.len);
+
+    // Check for each in particular.
+    inline for (expected_types, 0..) |ET, i| {
+        try expect(ET == generated_types[i]);
     }
 }
 
@@ -21,6 +41,31 @@ pub fn TypeArrayToPointerArrayOptional(comptime Types: ?[]const type) ?[]const t
             return TypeArrayToPointerArray(Ts);
         } else return null;
     }
+}
+
+test "TypeArrayToPointerArrayOptional" {
+    // Some example types to convert to their pointer form
+    const sample_types = [_]type{ i32, *i64, **f32 };
+    // The expected transformation
+    const expected_types = [_]type{ *i32, **i64, ***f32 };
+    // The actual transformation
+    const generated_types = TypeArrayToPointerArrayOptional(&sample_types);
+
+    // Should be able to capture it, since it should not be null
+    if (generated_types) |GT| {
+        // They should be the same length
+        try expect(GT.len == expected_types.len);
+
+        // Check for each in particular.
+        inline for (expected_types, 0..) |ET, i| {
+            try expect(ET == GT[i]);
+        }
+    } else {
+        return error.TypeArrayIsNullWhenItReallyShouldNotBe;
+    }
+
+    // Should return null for a null parameter
+    try expect(TypeArrayToPointerArrayOptional(null) == null);
 }
 
 /// Returns an array of types that is a version of the array of types 'Types'
@@ -59,7 +104,25 @@ pub fn ReduceTypeArray(comptime Types: []const type) []const type {
             }
         }
 
-        return reduced_types;
+        const const_reduced_types = reduced_types;
+        return const_reduced_types;
+    }
+}
+
+test "ReduceTypeArray" {
+    // An example array with multiple entries that are the same
+    const redundant_array = [_]type{ i32, i32, i32, f32, f32 };
+    // The same array, but without the redundant entries
+    const expected_array = [_]type{ i32, f32 };
+    // The one with its redundancy hopefully removed
+    const generated_array = ReduceTypeArray(&redundant_array);
+
+    // They should be the same length
+    try expect(generated_array.len == expected_array.len);
+
+    // Check for each in particular.
+    inline for (expected_array, 0..) |ET, i| {
+        try expect(ET == generated_array[i]);
     }
 }
 
@@ -72,7 +135,25 @@ pub fn ComptimeTypeArrayToString(comptime Types: []const type) []const u8 {
             text = std.fmt.comptimePrint("{s}, {s}", .{ text, @typeName(Types[i]) });
         }
 
-        return text;
+        const const_text = text;
+        return const_text;
+    }
+}
+
+test "ComptimeTypeArrayToString" {
+    // An example array
+    const example_array = [_]type{ i32, f32, []const u8 };
+    // The expected output
+    const expected_string = "i32, f32, []const u8";
+    // The generated one
+    const generated_string = comptime ComptimeTypeArrayToString(&example_array);
+
+    // They should be the same length
+    try expect(generated_string.len == expected_string.len);
+
+    // Check for each in particular.
+    inline for (generated_string, 0..) |ExpectedChar, i| {
+        try expect(ExpectedChar == generated_string[i]);
     }
 }
 
@@ -84,7 +165,27 @@ pub fn ComptimeArrayAppend(comptime T: type, comptime target: []const T, comptim
         result[i] = part;
     };
     result[target.len] = add;
-    return &result;
+
+    const const_result = result;
+    return &const_result;
+}
+
+test "ComptimeArrayAppend" {
+    // Some example array to be appended to an example integer
+    const array_1 = [_]i32{ 10, 20 };
+    const example_value: i32 = 30;
+    // The expected appended-to array
+    const expected_append = [_]i32{ 10, 20, 30 };
+    // The generated appended-to array
+    const generated_append = comptime ComptimeArrayAppend(i32, &array_1, example_value);
+
+    // They should be the same length
+    try expect(generated_append.len == expected_append.len);
+
+    // Check for each in particular.
+    inline for (expected_append, 0..) |ExpectedInteger, i| {
+        try expect(ExpectedInteger == generated_append[i]);
+    }
 }
 
 /// Merges two arrays of type T by creating a new array that is equal in size
@@ -98,7 +199,27 @@ pub fn ComptimeArrayMerge(comptime T: type, comptime target: []const T, comptime
     comptime for (add, 0..) |part, i| {
         result[i + target.len] = part;
     };
-    return &result;
+
+    const const_result = result;
+    return &const_result;
+}
+
+test "ComptimeArrayMerge" {
+    // Some example arrays to be merged
+    const array_1 = [_]i32{ 10, 20 };
+    const array_2 = [_]i32{ 30, 40 };
+    // The expected merged array
+    const expected_merge = [_]i32{ 10, 20, 30, 40 };
+    // The generated merged array
+    const generated_merge = comptime ComptimeArrayMerge(i32, &array_1, &array_2);
+
+    // They should be the same length
+    try expect(generated_merge.len == expected_merge.len);
+
+    // Check for each in particular.
+    inline for (expected_merge, 0..) |ExpectedInteger, i| {
+        try expect(ExpectedInteger == generated_merge[i]);
+    }
 }
 
 /// The functions used to name fields must share this signature.
@@ -112,6 +233,24 @@ pub fn ComptimeDefaultFieldNamer(comptime T: type, comptime index: usize) [:0]co
     return std.fmt.comptimePrint("field_{d}_{s}", .{ index, @typeName(T) });
 }
 
+test "ComptimeDefaultFieldNamer" {
+    // Example field entry
+    const example_type = i32;
+    const example_index = 0;
+    // The expected generated string for this case
+    const expected_string = "field_0_i32";
+    // The generated string for this case
+    const generated_string = comptime ComptimeDefaultFieldNamer(example_type, example_index);
+
+    // They should be the same length
+    try expect(generated_string.len == expected_string.len);
+
+    // Check for each in particular.
+    inline for (generated_string, 0..) |ExpectedChar, i| {
+        try expect(ExpectedChar == generated_string[i]);
+    }
+}
+
 /// A naming function that names the field just the type name of the field.
 /// The 'index' parameter is discarded, but it is still here for compatibility.
 /// Used for optimal auto containers, where there's only one field for each type.
@@ -120,12 +259,48 @@ pub fn ComptimeTypeNameFieldNamer(comptime T: type, comptime index: usize) [:0]c
     return std.fmt.comptimePrint("{s}", .{@typeName(T)});
 }
 
+test "ComptimeTypeNameFieldNamer" {
+    // Example field entry
+    const example_type = i32;
+    const example_index = 0;
+    // The expected generated string for this case
+    const expected_string = "i32";
+    // The generated string for this case
+    const generated_string = comptime ComptimeTypeNameFieldNamer(example_type, example_index);
+
+    // They should be the same length
+    try expect(generated_string.len == expected_string.len);
+
+    // Check for each in particular.
+    inline for (generated_string, 0..) |ExpectedChar, i| {
+        try expect(ExpectedChar == generated_string[i]);
+    }
+}
+
 /// A naming function that names the field just the index of it.
 /// The 'T' parameter is discarded, but it is still here for compatibility.
 /// Used for optimal auto containers, where there's multiple fields with the same type.
 pub fn ComptimeIndexFieldNamer(comptime T: type, comptime index: usize) [:0]const u8 {
     _ = T;
     return std.fmt.comptimePrint("{d}", .{index});
+}
+
+test "ComptimeIndexFieldNamer" {
+    // Example field entry
+    const example_type = i32;
+    const example_index = 0;
+    // The expected generated string for this case
+    const expected_string = "0";
+    // The generated string for this case
+    const generated_string = comptime ComptimeIndexFieldNamer(example_type, example_index);
+
+    // They should be the same length
+    try expect(generated_string.len == expected_string.len);
+
+    // Check for each in particular.
+    inline for (generated_string, 0..) |ExpectedChar, i| {
+        try expect(ExpectedChar == generated_string[i]);
+    }
 }
 
 /// Merges multiple lines into one, adding a predefined space before each new line character.
@@ -140,6 +315,44 @@ pub fn ComptimeSpacedPrint(comptime spaces: usize, comptime lines: []const [:0]c
             }
             collapsed = std.fmt.comptimePrint("{s}{s}\n", .{ collapsed, line });
         }
-        return collapsed;
+
+        const const_collapsed = collapsed;
+        return const_collapsed;
+    }
+}
+
+test "ComptimeSpacedPrint - Spacing = 0" {
+    // Example lines to be merged
+    const example_spacing = 0;
+    const example_lines = [_][:0]const u8{ "ABC", "DEF", "XYZ" };
+    // The expected generated string for this case
+    const expected_string = "ABC\nDEF\nXYZ\n";
+    // The generated string for this case
+    const generated_string = comptime ComptimeSpacedPrint(example_spacing, &example_lines);
+
+    // They should be the same length
+    try expect(generated_string.len == expected_string.len);
+
+    // Check for each in particular.
+    inline for (generated_string, 0..) |ExpectedChar, i| {
+        try expect(ExpectedChar == generated_string[i]);
+    }
+}
+
+test "ComptimeSpacedPrint - Spacing = 4" {
+    // Example lines to be merged
+    const example_spacing = 4;
+    const example_lines = [_][:0]const u8{ "ABC", "DEF", "XYZ" };
+    // The expected generated string for this case
+    const expected_string = "    ABC\n    DEF\n    XYZ\n";
+    // The generated string for this case
+    const generated_string = comptime ComptimeSpacedPrint(example_spacing, &example_lines);
+
+    // They should be the same length
+    try expect(generated_string.len == expected_string.len);
+
+    // Check for each in particular.
+    inline for (generated_string, 0..) |ExpectedChar, i| {
+        try expect(ExpectedChar == generated_string[i]);
     }
 }

@@ -64,6 +64,14 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    const utils_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/utils.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_utils_tests = b.addRunArtifact(utils_tests);
+
     const autounion_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/autounion.zig" },
         .target = target,
@@ -88,16 +96,23 @@ pub fn build(b: *std.Build) void {
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
+    const utils_test_step = b.step("test-utils", "Run utils tests");
+    utils_test_step.dependOn(&run_utils_tests.step);
+
     const autounion_test_step = b.step("test-autounion", "Run auto-union tests");
+    autounion_test_step.dependOn(&run_utils_tests.step);
     autounion_test_step.dependOn(&run_autounion_tests.step);
 
     const node_test_step = b.step("test-node", "Run node tests");
+    node_test_step.dependOn(&run_utils_tests.step);
+    node_test_step.dependOn(&run_autounion_tests.step);
     node_test_step.dependOn(&run_node_tests.step);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(utils_test_step);
     test_step.dependOn(autounion_test_step);
     test_step.dependOn(node_test_step);
     test_step.dependOn(&run_exe_unit_tests.step);

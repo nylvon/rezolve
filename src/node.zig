@@ -21,18 +21,21 @@ const expectError = testing.expectError;
 /// NOTE: You will see these being the just (non-const) pointer forms of the internal NodeType's
 ///       input and output data bus types.
 pub fn NodeTypeFunction(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]const type) type {
-    const InputBusReferenceType = DataBusReferenceType(utils.TypeArrayToPointerArrayOptional(InputTypes));
-    const OutputBusReferenceType = DataBusReferenceType(OutputTypes);
+    comptime {
+        const InputPointers = utils.TypeArrayToPointerArrayOptional(InputTypes);
+        const InputBusReferenceType = DataBusReferenceType(InputPointers);
+        const OutputBusReferenceType = DataBusReferenceType(OutputTypes);
 
-    switch (InputBusReferenceType) {
-        void => switch (OutputBusReferenceType) {
-            void => return comptime *const fn () anyerror!void,
-            else => return comptime *const fn (OutputBusReferenceType) anyerror!void,
-        },
-        else => switch (OutputBusReferenceType) {
-            void => return comptime *const fn (InputBusReferenceType) anyerror!void,
-            else => return comptime *const fn (InputBusReferenceType, OutputBusReferenceType) anyerror!void,
-        },
+        switch (InputBusReferenceType) {
+            void => switch (OutputBusReferenceType) {
+                void => return *const fn () anyerror!void,
+                else => return *const fn (OutputBusReferenceType) anyerror!void,
+            },
+            else => switch (OutputBusReferenceType) {
+                void => return *const fn (InputBusReferenceType) anyerror!void,
+                else => return *const fn (InputBusReferenceType, OutputBusReferenceType) anyerror!void,
+            },
+        }
     }
 }
 
@@ -40,14 +43,26 @@ pub fn NodeTypeFunction(comptime InputTypes: ?[]const type, comptime OutputTypes
 /// given by the length and by the types of 'Types'.
 /// If 'Types' is null, this will return void, indicating a lack of a data bus.
 pub fn DataBusType(comptime Types: ?[]const type) type {
-    return if (Types) |Ts| [Ts.len]AutoUnion(Ts) else void;
+    comptime {
+        if (Types) |Ts| {
+            const DataBusEntry = AutoUnion(Ts);
+            const DataBus = [Ts.len]DataBusEntry;
+            return DataBus;
+        } else return void;
+    }
 }
 
 /// Returns the type of a referenced data bus by creating an array of Optimal Auto Union Wrappers
 /// given by the length and by the types of 'Types'.
 /// If 'Types' is null, this will return void, indicating a lack of a data bus.
 pub fn DataBusReferenceType(comptime Types: ?[]const type) type {
-    return if (Types) |Ts| *[Ts.len]AutoUnion(Ts) else void;
+    comptime {
+        if (Types) |Ts| {
+            const DataBusEntry = AutoUnion(Ts);
+            const DataBusReference = *[Ts.len]DataBusEntry;
+            return DataBusReference;
+        } else return void;
+    }
 }
 /// Returns a node type that has an input data bus, an output data bus, and a function that maps
 /// the inputs to the outputs.
@@ -360,12 +375,11 @@ pub fn BinaryAddFn(inputs: DataBusReferenceType(utils.TypeArrayToPointerArray(&[
 // type i32, and holds the result in an output of type i32.
 test "Function Tests" {
     // some example types for the input and output buses.
-    const out_types = &[_]type{i32};
-    const in_types = &[_]type{ i32, i32 };
+    const out_types = comptime [_]type{i32};
+    const in_types = comptime [_]type{ i32, i32 };
 
-    // the entries in the data buses
-    const in_oau_type = AutoUnion(utils.TypeArrayToPointerArray(in_types));
-    const out_oau_type = AutoUnion(out_types);
+    const in_oau_type = comptime AutoUnion(utils.TypeArrayToPointerArray(&in_types));
+    const out_oau_type = comptime AutoUnion(&out_types);
 
     // some example forced input values.
     const in_1_forced: i32 = 10;
@@ -378,8 +392,8 @@ test "Function Tests" {
     const out_1 = try out_oau_type.Create(i32, out_1_before);
 
     // the simulated data buses
-    var in_bus: DataBusType(utils.TypeArrayToPointerArray(in_types)) = .{ in_1, in_2 };
-    var out_bus: DataBusType(out_types) = .{out_1};
+    var in_bus: DataBusType(utils.TypeArrayToPointerArray(&in_types)) = .{ in_1, in_2 };
+    var out_bus: DataBusType(&out_types) = .{out_1};
 
     // before the operation, the input values should be the ones we forced in
     // and the output should be zero, since we didn't do anything with it yet.
