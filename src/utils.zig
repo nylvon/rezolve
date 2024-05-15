@@ -386,3 +386,39 @@ test "ComptimeSpacedPrint - Spacing = 4" {
         try expect(ExpectedChar == generated_string[i]);
     }
 }
+
+/// Returns a binary function that does nothing with its arguments and just returns.
+pub fn EmptyFunctionBinary(comptime A: type, comptime B: type, comptime R: type, comptime R_Value: ?R) *const fn (A, B) R {
+    comptime if (R == void or R == anyerror!void) {
+        return struct {
+            pub fn EmptyFunctionVoid(a: A, b: B) R {
+                _ = a;
+                _ = b;
+                return;
+            }
+        }.EmptyFunctionVoid;
+    } else return struct {
+        pub fn EmptyFunction(a: A, b: B) R {
+            _ = a;
+            _ = b;
+            return R_Value.?;
+        }
+    }.EmptyFunction;
+}
+
+/// Returns an unary function that does nothing with its argument and just returns.
+pub fn EmptyFunctionUnary(comptime A: type, comptime R: type, comptime R_Value: ?R) *const fn (A) R {
+    comptime if (R == void or R == anyerror!void) {
+        return struct {
+            pub fn EmptyFunctionVoid(a: A) R {
+                _ = a;
+                return;
+            }
+        }.EmptyFunctionVoid;
+    } else return struct {
+        pub fn EmptyFunction(a: A) R {
+            _ = a;
+            return R_Value.?;
+        }
+    }.EmptyFunction;
+}
