@@ -129,8 +129,9 @@ pub fn OptimalAutoUnionWrapper(comptime Types: []const type) type {
             inline for (BaseTypes) |BT| {
                 if (BT == T) {
                     return CreateUnsafe(T, value);
-                } else return Errors.TypeNotFoundInSelf;
+                }
             }
+            return Errors.TypeNotFoundInSelf;
         }
 
         /// Creates an instance of this type with an undefined value.
@@ -147,8 +148,9 @@ pub fn OptimalAutoUnionWrapper(comptime Types: []const type) type {
             inline for (BaseTypes) |BT| {
                 if (BT == T) {
                     return CreateUndefiendUnsafe(T);
-                } else return Errors.TypeNotFoundInSelf;
+                }
             }
+            return Errors.TypeNotFoundInSelf;
         }
 
         /// Gets the value of the current active union field given by the type specified.
