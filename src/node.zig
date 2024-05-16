@@ -64,6 +64,10 @@ pub fn DataBusReferenceType(comptime Types: ?[]const type) type {
         } else return void;
     }
 }
+
+/// Ease of use enum to use in functions that can refer to either bus.
+pub const Bus = enum { Input, Output };
+
 /// Returns a node type that has an input data bus, an output data bus, and a function that maps
 /// the inputs to the outputs.
 /// The input types get converted to an optimal auto union wrapper, and then the input data bus is formed
@@ -111,9 +115,6 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
             LacksBus,
         };
 
-        /// Ease of use enum to use in functions that can refer to either bus.
-        pub const Bus = enum { Input, Output };
-
         /// If the index is within bounds, this will return void.
         /// If it's not, or if the bus doesn't exist, this will return an error.
         pub fn IndexCheck(index: usize, bus: Bus) !void {
@@ -129,11 +130,21 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
             }
         }
 
+        /// Uses a self reference to call index check indirectly.
+        /// Used for when computing the type is not feasible.
+        pub fn SelfIndexCheck(self: *@This(), index: usize, bus: Bus) !void {
+            _ = self;
+            try IndexCheck(index, bus);
+        }
+
         /// Sets an entry of the input data bus to point to a target.
         pub fn SetInput(self: *@This(), index: usize, T: type, target: *T) !void {
             try IndexCheck(index, .Input);
 
-            self.input_data_ports[index] = try InputDataBusEntryType.Create(*T, target);
+            // This SHOULDN'T be necessary, but the compiler needs it to not throw a hissy fit.
+            if (InputDataBusType != void) {
+                self.input_data_ports[index] = try InputDataBusEntryType.Create(*T, target);
+            } else unreachable;
         }
 
         /// Sets the target's underlying pointer to point to an entry of the output data bus.
