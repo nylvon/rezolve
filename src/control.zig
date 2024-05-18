@@ -144,9 +144,9 @@ test "WrapNodeFunctionInUnifiedForm" {
     const expected_function_types = GenerateNodeTypeFunctionsFrom(&input_types, &output_types);
 
     // Some random, arbitrary functions that match the signatures
-    const expected_function_1 = comptime utils.EmptyFunctionBinary(NodeLib.DataBusReferenceType(utils.TypeArrayToPointerArrayOptional(input_types[0])), NodeLib.DataBusReferenceType(output_types[0]), anyerror!void, null);
+    const expected_function_1 = comptime utils.EmptyFunctionBinary(NodeLib.DataBusReferenceType(utils.TypeArrayToOptionalArrayOptional(utils.TypeArrayToPointerArrayOptional(input_types[0]))), NodeLib.DataBusReferenceType(output_types[0]), anyerror!void, null);
     const expected_function_2 = comptime utils.EmptyFunctionUnary(NodeLib.DataBusReferenceType(output_types[1]), anyerror!void, null);
-    const expected_function_3 = comptime utils.EmptyFunctionBinary(NodeLib.DataBusReferenceType(utils.TypeArrayToPointerArrayOptional(input_types[2])), NodeLib.DataBusReferenceType(output_types[2]), anyerror!void, null);
+    const expected_function_3 = comptime utils.EmptyFunctionBinary(NodeLib.DataBusReferenceType(utils.TypeArrayToOptionalArrayOptional(utils.TypeArrayToPointerArrayOptional(input_types[2]))), NodeLib.DataBusReferenceType(output_types[2]), anyerror!void, null);
 
     // The unified type wrapper
     const unified_function_type = UnifiedNodeTypeFunction(&input_types, &output_types);
@@ -228,7 +228,7 @@ pub fn ControlPointType(
             pub const NodeTypesBase = UnifiedReferenceBase.BaseTypes;
 
             /// Verifies that the node reference is not null
-            pub fn ValidNodeReference(target: @This()) !void {
+            pub fn CheckIfValidNodeReference(target: @This()) !void {
                 switch (target.node_reference.inner) {
                     inline else => |NodeReference| {
                         if (NodeReference == null) {
@@ -239,8 +239,8 @@ pub fn ControlPointType(
             }
 
             /// Verifies that the given bus on the node reference exists.
-            pub fn ValidBus(target: @This()) !void {
-                try target.ValidNodeReference();
+            pub fn CheckIfValidBus(target: @This()) !void {
+                try target.CheckIfValidNodeReference();
 
                 switch (target.node_reference.inner) {
                     inline else => |NodeReference| {
@@ -253,8 +253,8 @@ pub fn ControlPointType(
             }
 
             /// Verifies that the given port on the given bus on the node reference exists.
-            pub fn ValidPort(target: @This()) !void {
-                try target.ValidNodeReference();
+            pub fn CheckIfValidPort(target: @This()) !void {
+                try target.CheckIfValidNodeReference();
 
                 switch (target.node_reference.inner) {
                     inline else => |NodeReference| {
@@ -267,12 +267,13 @@ pub fn ControlPointType(
             }
 
             /// Aliasing valid connection to mean this makes it easier to read.
-            pub const ValidConnection = ValidPort;
+            pub const CheckIfValidConnection = CheckIfValidPort;
 
-            /// TODO: write documentation
+            /// Connects two control points.
+            /// Only input-output connections are allowed.
             pub fn Connect(this: @This(), that: @This(), T: type) !void {
-                try this.ValidPort();
-                try that.ValidPort();
+                try this.CheckIfValidPort();
+                try that.CheckIfValidPort();
 
                 switch (this.node_reference.inner) {
                     inline else => |ThisNode| {
@@ -281,7 +282,6 @@ pub fn ControlPointType(
                                 var node_a = ThisNode.?;
                                 var node_b = ThatNode.?;
 
-                                // std.log.err("\na: {s}\nb: {s}\n", .{ @typeName(@TypeOf(node_a)), @typeName(@TypeOf(node_b)) });
                                 switch (this.bus) {
                                     .Input => {
                                         switch (that.bus) {
@@ -313,7 +313,8 @@ pub fn ControlPointType(
     }
 }
 
-test "ControlPointType" {
+// Simulate how control points work, without them being embedded in a type
+test "ControlPointType, external use" {
     // Each node definition has an input type array and an output type array
     // There's 3 arbitray node definitions here.
     const input_types = [_]?[]const type{ //
@@ -328,9 +329,9 @@ test "ControlPointType" {
     };
 
     // Some random, arbitrary functions that match the signatures
-    const expected_function_1 = comptime utils.EmptyFunctionBinary(NodeLib.DataBusReferenceType(utils.TypeArrayToPointerArrayOptional(input_types[0])), NodeLib.DataBusReferenceType(output_types[0]), anyerror!void, null);
+    const expected_function_1 = comptime utils.EmptyFunctionBinary(NodeLib.DataBusReferenceType(utils.TypeArrayToOptionalArrayOptional(utils.TypeArrayToPointerArrayOptional(input_types[0]))), NodeLib.DataBusReferenceType(output_types[0]), anyerror!void, null);
     const expected_function_2 = comptime utils.EmptyFunctionUnary(NodeLib.DataBusReferenceType(output_types[1]), anyerror!void, null);
-    const expected_function_3 = comptime utils.EmptyFunctionBinary(NodeLib.DataBusReferenceType(utils.TypeArrayToPointerArrayOptional(input_types[2])), NodeLib.DataBusReferenceType(output_types[2]), anyerror!void, null);
+    const expected_function_3 = comptime utils.EmptyFunctionBinary(NodeLib.DataBusReferenceType(utils.TypeArrayToOptionalArrayOptional(utils.TypeArrayToPointerArrayOptional(input_types[2]))), NodeLib.DataBusReferenceType(output_types[2]), anyerror!void, null);
 
     // The unified type wrapper
     const unified_function_type = UnifiedNodeTypeFunction(&input_types, &output_types);
@@ -342,21 +343,29 @@ test "ControlPointType" {
         comptime WrapNodeFunctionInUnifiedForm(input_types[2], output_types[2], expected_function_3, &input_types, &output_types),
     };
 
+    // Generate some example node type and some nodes to try to simulate the control points on their own
     const node_type_1 = NodeType(input_types[0], output_types[0], expected_function_1);
     var node_1 = node_type_1.Create();
     var node_2 = node_type_1.Create();
 
+    // Generating the unified reference type and some node references for the control points
     const unified_reference_type = UnifiedReferenceType(&input_types, &output_types, &expected_functions);
     const node_1_ref = try unified_reference_type.Create(?*node_type_1, @constCast(&node_1));
     const node_2_ref = try unified_reference_type.Create(?*node_type_1, @constCast(&node_2));
 
-    const CTP1 = comptime ControlPointType(&input_types, &output_types, &expected_functions);
-    const ctp1 = CTP1{ .node_reference = node_1_ref, .bus = .Input, .port = 1 };
-    const ctp2 = CTP1{ .node_reference = node_2_ref, .bus = .Output, .port = 0 };
-    const ctp3 = CTP1{ .node_reference = node_1_ref, .bus = .Input, .port = 0 };
-    const ctp4 = CTP1{ .node_reference = node_1_ref, .bus = .Output, .port = 0 };
+    // Generating some control points to simulate them
+    const ctrl_type = comptime ControlPointType(&input_types, &output_types, &expected_functions);
+    const ctrl_1 = ctrl_type{ .node_reference = node_1_ref, .bus = .Input, .port = 1 };
+    const ctrl_2 = ctrl_type{ .node_reference = node_2_ref, .bus = .Output, .port = 0 };
+    const ctrl_3 = ctrl_type{ .node_reference = node_1_ref, .bus = .Input, .port = 0 };
+    const ctrl_4 = ctrl_type{ .node_reference = node_1_ref, .bus = .Output, .port = 0 };
+    const ctrl_5 = ctrl_type{ .node_reference = node_1_ref, .bus = .Output, .port = 1 };
 
-    try ctp2.Connect(ctp1, i32);
-    try expectError(ControlPointErrors.InputToInputConnection, ctp3.Connect(ctp1, i32));
-    try expectError(ControlPointErrors.OutputToOutputConnection, ctp4.Connect(ctp2, i32));
+    // This should work, it's an input<->output connection, on ports that exist on the buses given
+    try ctrl_2.Connect(ctrl_1, i32);
+    // These two should fail because these are input<->input connections and output<->output connections, which are invalid
+    try expectError(ControlPointErrors.InputToInputConnection, ctrl_3.Connect(ctrl_1, i32));
+    try expectError(ControlPointErrors.OutputToOutputConnection, ctrl_4.Connect(ctrl_2, i32));
+    // This should fail because there is only one entry on the output bus of the node, so "port 1" doesn't exist on the output bus.
+    try expectError(NodeLib.NodeErrors.InvalidIndex, ctrl_5.Connect(ctrl_2, i32));
 }

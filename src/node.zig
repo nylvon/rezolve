@@ -22,7 +22,7 @@ const expectError = testing.expectError;
 ///       input and output data bus types.
 pub fn NodeTypeFunction(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]const type) type {
     comptime {
-        const InputPointers = utils.TypeArrayToPointerArrayOptional(InputTypes);
+        const InputPointers = utils.TypeArrayToOptionalArrayOptional(utils.TypeArrayToPointerArrayOptional(InputTypes));
         const InputBusReferenceType = DataBusReferenceType(InputPointers);
         const OutputBusReferenceType = DataBusReferenceType(OutputTypes);
 
@@ -72,6 +72,7 @@ pub const Bus = enum { Input, Output };
 pub const NodeErrors = error{
     InvalidIndex,
     LacksBus,
+    NullPointerAccess,
 };
 
 /// Returns a node type that has an input data bus, an output data bus, and a function that maps
@@ -97,11 +98,11 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
         pub const OutputTypesBaseLength = if (OutputTypes) |OT| OT.len else @as(usize, 0);
 
         /// The derived optimal auto union wrapper types for the entries to the data buses.
-        pub const InputDataBusEntryType = if (InputTypes) |IT| AutoUnion(utils.TypeArrayToPointerArray(IT)) else void;
+        pub const InputDataBusEntryType = if (InputTypes) |IT| AutoUnion(utils.TypeArrayToOptionalArray(utils.TypeArrayToPointerArray(IT))) else void;
         pub const OutputDataBusEntryType = if (OutputTypes) |OT| AutoUnion(OT) else void;
 
         /// The derived data bus types.
-        pub const InputDataBusType = DataBusType(utils.TypeArrayToPointerArrayOptional(InputTypes));
+        pub const InputDataBusType = DataBusType(utils.TypeArrayToOptionalArrayOptional(utils.TypeArrayToPointerArrayOptional(InputTypes)));
         pub const OutputDataBusType = DataBusType(OutputTypes);
 
         /// The default values of the data buses.
@@ -138,20 +139,24 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
         }
 
         /// Sets an entry of the input data bus to point to a target.
-        pub fn SetInput(self: *@This(), index: usize, T: type, target: *T) !void {
+        pub fn SetInput(self: *@This(), index: usize, T: type, target: ?*T) !void {
             try IndexCheck(index, .Input);
 
-            // This SHOULDN'T be necessary, but the compiler needs it to not throw a hissy fit.
+            // This if condition SHOULDN'T be necessary, but the compiler needs it to not throw a hissy fit.
             if (InputDataBusType != void) {
-                self.input_data_ports[index] = try InputDataBusEntryType.Create(*T, target);
+                if (target) |RealTarget| {
+                    self.input_data_ports[index] = try InputDataBusEntryType.Create(?*T, RealTarget);
+                } else return NodeErrors.NullPointerAccess;
             } else unreachable;
         }
 
         /// Sets the target's underlying pointer to point to an entry of the output data bus.
-        pub fn SetOutput(self: *@This(), index: usize, T: type, target: **T) !void {
+        pub fn SetOutput(self: *@This(), index: usize, T: type, target: ?*?*T) !void {
             try IndexCheck(index, .Output);
 
-            target.* = try self.output_data_ports[index].GetReference(T);
+            if (target) |RealTarget| {
+                RealTarget.* = try self.output_data_ports[index].GetReference(T);
+            } else return NodeErrors.NullPointerAccess;
         }
 
         /// Gets the value of a data entry on the specified bus at the given index.
@@ -163,8 +168,10 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
             switch (bus) {
                 .Input => {
                     if (InputDataBusType != void) {
-                        const input_pointer = try self.input_data_ports[index].GetValue(*T);
-                        return input_pointer.*;
+                        const input_pointer = try self.input_data_ports[index].GetValue(?*T);
+                        if (input_pointer) |RealInputPointer| {
+                            return RealInputPointer.*;
+                        } else return NodeErrors.NullPointerAccess;
                     } else unreachable;
                 },
                 .Output => {
@@ -183,8 +190,10 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
             switch (bus) {
                 .Input => {
                     if (InputDataBusType != void) {
-                        const input_pointer = try self.input_data_ports[index].GetReference(*T);
-                        return input_pointer.*;
+                        const input_pointer = try self.input_data_ports[index].GetReference(?*T);
+                        if (input_pointer.*) |RealInputPointer| {
+                            return RealInputPointer;
+                        } else return NodeErrors.NullPointerAccess;
                     } else unreachable;
                 },
                 .Output => {
@@ -198,11 +207,11 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
         /// Gets a double pointer to an entry on the input data bus.
         /// This is used in order to modify an input pointer from the outside.
         /// Used for the SetOutput function in the context of other nodes.
-        pub fn PointToInput(self: *@This(), index: usize, T: type) !**T {
+        pub fn PointToInput(self: *@This(), index: usize, T: type) !*?*T {
             try IndexCheck(index, .Input);
 
             if (InputDataBusType != void) {
-                const input_double_pointer = try self.input_data_ports[index].GetReference(*T);
+                const input_double_pointer = try self.input_data_ports[index].GetReference(?*T);
                 return input_double_pointer;
             } else unreachable;
         }
@@ -212,7 +221,7 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
         pub fn GetType(bus: Bus, index: usize) !type {
             try IndexCheck(index, bus);
             switch (bus) {
-                .Input => return *InputTypesBase[index],
+                .Input => return ?*InputTypesBase[index],
                 .Output => return OutputTypesBase[index],
             }
         }
@@ -238,7 +247,7 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
             comptime {
                 var inputs: InputDataBusType = undefined;
                 if (InputDataBusType != void) {
-                    for (utils.TypeArrayToPointerArray(InputTypes.?), 0..) |IT, i| {
+                    for (utils.TypeArrayToOptionalArray(utils.TypeArrayToPointerArray(InputTypes.?)), 0..) |IT, i| {
                         inputs[i] = try InputDataBusEntryType.CreateUndefined(IT);
                     }
                 }
@@ -372,11 +381,13 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
 }
 
 /// An example binary addition function.
-pub fn BinaryAddFn(inputs: DataBusReferenceType(utils.TypeArrayToPointerArray(&[_]type{ i32, i32 })), outputs: DataBusReferenceType(&[_]type{i32})) !void {
-    const in_0 = try inputs[0].GetValue(*i32);
-    const in_1 = try inputs[1].GetValue(*i32);
+pub fn BinaryAddFn(inputs: DataBusReferenceType(utils.TypeArrayToOptionalArray(utils.TypeArrayToPointerArray(&[_]type{ i32, i32 }))), outputs: DataBusReferenceType(&[_]type{i32})) !void {
+    const in_0 = try inputs[0].GetValue(?*i32);
+    const in_1 = try inputs[1].GetValue(?*i32);
     const out_0 = try outputs[0].GetReference(i32);
-    out_0.* = in_0.* + in_1.*;
+    if (in_0 != null and in_1 != null) {
+        out_0.* = in_0.?.* + in_1.?.*;
+    } else return NodeErrors.NullPointerAccess;
 }
 
 // Tests whether the function part of the nodes works.
@@ -389,7 +400,7 @@ test "Function Tests" {
     const out_types = comptime [_]type{i32};
     const in_types = comptime [_]type{ i32, i32 };
 
-    const in_oau_type = comptime AutoUnion(utils.TypeArrayToPointerArray(&in_types));
+    const in_oau_type = comptime AutoUnion(utils.TypeArrayToOptionalArray(utils.TypeArrayToPointerArray(&in_types)));
     const out_oau_type = comptime AutoUnion(&out_types);
 
     // some example forced input values.
@@ -398,39 +409,39 @@ test "Function Tests" {
     const out_1_before: i32 = 0;
 
     // some example values for two inputs of some node, and a temporary output value.
-    const in_1 = try in_oau_type.Create(*i32, @constCast(&in_1_forced));
-    const in_2 = try in_oau_type.Create(*i32, @constCast(&in_2_forced));
+    const in_1 = try in_oau_type.Create(?*i32, @constCast(&in_1_forced));
+    const in_2 = try in_oau_type.Create(?*i32, @constCast(&in_2_forced));
     const out_1 = try out_oau_type.Create(i32, out_1_before);
 
     // the simulated data buses
-    var in_bus: DataBusType(utils.TypeArrayToPointerArray(&in_types)) = .{ in_1, in_2 };
+    var in_bus: DataBusType(utils.TypeArrayToOptionalArray(utils.TypeArrayToPointerArray(&in_types))) = .{ in_1, in_2 };
     var out_bus: DataBusType(&out_types) = .{out_1};
 
     // before the operation, the input values should be the ones we forced in
     // and the output should be zero, since we didn't do anything with it yet.
-    const in_1_value_before = try in_bus[0].GetValue(*i32);
-    const in_2_value_before = try in_bus[1].GetValue(*i32);
+    const in_1_value_before = try in_bus[0].GetValue(?*i32);
+    const in_2_value_before = try in_bus[1].GetValue(?*i32);
     const out_1_value_before = try out_bus[0].GetValue(i32);
 
     // check
-    try expect(in_1_value_before.* == in_1_forced);
-    try expect(in_2_value_before.* == in_2_forced);
+    try expect(in_1_value_before.?.* == in_1_forced);
+    try expect(in_2_value_before.?.* == in_2_forced);
     try expect(out_1_value_before == 0);
 
     // do the operation
     try BinaryAddFn(&in_bus, &out_bus);
 
     // now the output should have changed, but the input should not have
-    const in_1_value_after = try in_bus[0].GetValue(*i32);
-    const in_2_value_after = try in_bus[1].GetValue(*i32);
+    const in_1_value_after = try in_bus[0].GetValue(?*i32);
+    const in_2_value_after = try in_bus[1].GetValue(?*i32);
     const out_1_value_after = try out_bus[0].GetValue(i32);
 
     // the expected state of the output.
     const out_1_value_after_expected = in_1_forced + in_2_forced;
 
     // check
-    try expect(in_1_value_after.* == in_1_forced);
-    try expect(in_2_value_after.* == in_2_forced);
+    try expect(in_1_value_after.?.* == in_1_forced);
+    try expect(in_2_value_after.?.* == in_2_forced);
     try expect(out_1_value_after == out_1_value_after_expected);
 }
 
