@@ -68,6 +68,12 @@ pub fn DataBusReferenceType(comptime Types: ?[]const type) type {
 /// Ease of use enum to use in functions that can refer to either bus.
 pub const Bus = enum { Input, Output };
 
+/// The complete error set used for nodes.
+pub const NodeErrors = error{
+    InvalidIndex,
+    LacksBus,
+};
+
 /// Returns a node type that has an input data bus, an output data bus, and a function that maps
 /// the inputs to the outputs.
 /// The input types get converted to an optimal auto union wrapper, and then the input data bus is formed
@@ -109,23 +115,17 @@ pub fn NodeType(comptime InputTypes: ?[]const type, comptime OutputTypes: ?[]con
         /// Ideally the function should be marked as inline, too.
         pub const Function = FunctionReference;
 
-        /// The complete error set used for nodes.
-        pub const Errors = error{
-            InvalidIndex,
-            LacksBus,
-        };
-
         /// If the index is within bounds, this will return void.
         /// If it's not, or if the bus doesn't exist, this will return an error.
         pub fn IndexCheck(index: usize, bus: Bus) !void {
             switch (bus) {
                 .Input => {
-                    if (InputTypesBaseLength == 0) return Errors.LacksBus;
-                    if (index >= InputTypesBaseLength) return Errors.InvalidIndex;
+                    if (InputTypesBaseLength == 0) return NodeErrors.LacksBus;
+                    if (index >= InputTypesBaseLength) return NodeErrors.InvalidIndex;
                 },
                 .Output => {
-                    if (OutputTypesBaseLength == 0) return Errors.LacksBus;
-                    if (index >= OutputTypesBaseLength) return Errors.InvalidIndex;
+                    if (OutputTypesBaseLength == 0) return NodeErrors.LacksBus;
+                    if (index >= OutputTypesBaseLength) return NodeErrors.InvalidIndex;
                 },
             }
         }
